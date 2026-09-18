@@ -1,0 +1,510 @@
+// AAT Launch Operations Division (LOD) Management Platform
+// Prisma schema - PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN // Full system access, all sites/missions, user & COA management
+  LAUNCH_DIRECTOR // Can confirm/postpone/cancel/scrub missions, satisfy FAA checklist
+  OPERATOR // Station-level console access: GO/NO-GO, mission log, milestone updates
+  VIEWER // Read-only
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SiteStatus {
+  ACTIVE
+  STANDBY
+  UNDER_CONSTRUCTION
+  DECOMMISSIONED
+}
+
+enum SiteType {
+  FIXED_PAD
+  MOBILE_TEL
+  MARINE_PLATFORM
+  OTHER
+}
+
+enum MissionStatus {
+  PENDING_WINDOW
+  TARGETED
+  HOLD
+  SCRUBBED
+  POSTPONED
+  CANCELLED
+  SUCCESSFUL
+}
+
+enum MissionHistoryEventType {
+  TARGETED
+  POSTPONED
+  CANCELLED
+  SCRUBBED
+  SUCCESSFUL
+  NOTE
+}
+
+enum MilestoneStatus {
+  UPCOMING
+  IN_PROGRESS
+  COMPLETE
+  HELD
+}
+
+enum GoNoGoStatus {
+  UNPOLLED
+  GO
+  NO_GO
+  HOLD
+}
+
+enum CoaStatus {
+  ACTIVE
+  EXPIRED
+  PENDING
+}
+
+enum NotamFilingStatus {
+  NOT_FILED
+  FILED
+  OVERDUE
+}
+
+enum NotificationType {
+  T_MINUS_60
+  T_MINUS_15
+  TERMINATION
+}
+
+enum DocumentStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  ARCHIVED
+}
+
+// ---------------------------------------------------------------------------
+// Identity & access
+// ---------------------------------------------------------------------------
+
+model User {
+  id                String     @id @default(uuid())
+  name              String
+  email             String     @unique
+  passwordHash      String
+  role              Role       @default(VIEWER)
+  status            UserStatus @default(ACTIVE)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  assignedSites     UserSiteAssignment[]
+  assignedMissions  UserMissionAssignment[]
+
+  passwordResets    PasswordResetToken[]
+  refreshTokens     RefreshToken[]
+
+  uploadedDocuments Document[]        @relation("DocumentUploadedBy")
+  documentVersions  DocumentVersion[] @relation("DocumentVersionUploadedBy")
+  documentAudits    DocumentAuditEntry[]
+
+  missionHistoryEvents MissionHistoryEvent[]
+  missionLogEntries    MissionLogEntry[]
+  goNoGoUpdates        GoNoGoPoll[]
+  launchDayNotifications LaunchDayNotification[]
+  notamFilings         NOTAMFiling[]
+  auditLogEntries      AuditLogEntry[]
+
+  @@index([role])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model UserSiteAssignment {
+  userId String
+  siteId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  site   Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@id([userId, siteId])
+}
+
+model UserMissionAssignment {
+  userId    String
+  missionId String
+  role      String? // free-text console role, e.g. "Flight Dynamics Officer"
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mission   Mission @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, missionId])
+}
+
+// ---------------------------------------------------------------------------
+// Sites
+// ---------------------------------------------------------------------------
+
+model Site {
+  id                String     @id @default(uuid())
+  name              String
+  designator        String     @unique
+  lat               Float
+  lon               Float
+  elevationMeters    Float?
+  status            SiteStatus @default(STANDBY)
+  type              SiteType   @default(FIXED_PAD)
+  ownershipNotes    String?
+  jurisdictionNotes String?
+  nearestPopulationCenters String?
+  nearestWaterBodies       String?
+  terrainType              String?
+  countryCode       String   @default("US")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  photos     SitePhoto[]
+  missions   Mission[]
+  coas       COA[]
+  documents  Document[]
+  assignedUsers UserSiteAssignment[]
+
+  @@index([status])
+}
+
+model SitePhoto {
+  id        String   @id @default(uuid())
+  siteId    String
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  url       String
+  caption   String?
+  uploadedAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Vehicles & milestone templates
+// ---------------------------------------------------------------------------
+
+model Vehicle {
+  id             String   @id @default(uuid())
+  name           String
+  type           String?
+  windMaxKts     Float?
+  ceilingMinFt   Float?
+  lightningRadiusMi Float?
+  maxPrecipProbability Float?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  missions  Mission[]
+  templates MilestoneTemplate[]
+}
+
+model MilestoneTemplate {
+  id        String   @id @default(uuid())
+  vehicleId String
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+
+  items MilestoneTemplateItem[]
+}
+
+model MilestoneTemplateItem {
+  id             String            @id @default(uuid())
+  templateId     String
+  template       MilestoneTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  label          String
+  tMinusSeconds  Int // seconds before T-0; positive = before liftoff
+  sortOrder      Int               @default(0)
+}
+
+// ---------------------------------------------------------------------------
+// Missions
+// ---------------------------------------------------------------------------
+
+model Mission {
+  id          String        @id @default(uuid())
+  name        String
+  designator  String        @unique
+  vehicleId   String
+  vehicle     Vehicle       @relation(fields: [vehicleId], references: [id])
+  siteId      String
+  site        Site          @relation(fields: [siteId], references: [id])
+  status      MissionStatus @default(PENDING_WINDOW)
+  payloadDescription String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  launchPeriodEntries LaunchPeriodEntry[]
+  historyEvents       MissionHistoryEvent[]
+  disposition         MissionDisposition?
+  milestones          MissionMilestone[]
+  goNoGoPolls         GoNoGoPoll[]
+  logEntries          MissionLogEntry[]
+  notamFilings        NOTAMFiling[]
+  launchDayNotifications LaunchDayNotification[]
+  documents           Document[]
+  assignedUsers       UserMissionAssignment[]
+
+  @@index([status])
+  @@index([siteId])
+}
+
+model LaunchPeriodEntry {
+  id          String   @id @default(uuid())
+  missionId   String
+  mission     Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  date        DateTime // calendar date (UTC midnight) of the eligible window
+  windowOpen  DateTime // absolute UTC timestamp
+  windowClose DateTime // absolute UTC timestamp
+  isTargeted  Boolean  @default(false)
+  consumed    Boolean  @default(false) // scrubbed/used and no longer selectable
+  createdAt   DateTime @default(now())
+
+  historyEvents MissionHistoryEvent[]
+
+  @@index([missionId])
+}
+
+model MissionHistoryEvent {
+  id                      String                   @id @default(uuid())
+  missionId               String
+  mission                 Mission                  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  eventType               MissionHistoryEventType
+  timestamp               DateTime                 @default(now())
+  actorId                 String?
+  actor                   User?                    @relation(fields: [actorId], references: [id])
+  notes                   String?
+  relatedLaunchPeriodEntryId String?
+  relatedLaunchPeriodEntry  LaunchPeriodEntry?     @relation(fields: [relatedLaunchPeriodEntryId], references: [id])
+  metadata                Json?
+
+  @@index([missionId])
+}
+
+model MissionDisposition {
+  id                       String   @id @default(uuid())
+  missionId                String   @unique
+  mission                  Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  outcome                  String // e.g. "Successful"
+  actualLiftoffTime        DateTime?
+  apogeeAltitudeMeters     Float?
+  flightDurationSeconds    Int?
+  vehiclePerformanceNotes  String?
+  payloadOutcome           String?
+  recoveryStatus           String?
+  anomaliesNotes           String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+}
+
+model MissionMilestone {
+  id            String          @id @default(uuid())
+  missionId     String
+  mission       Mission         @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  label         String
+  tMinusSeconds Int
+  status        MilestoneStatus @default(UPCOMING)
+  actualTime    DateTime?
+  sortOrder     Int             @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([missionId])
+}
+
+model GoNoGoPoll {
+  id          String       @id @default(uuid())
+  missionId   String
+  mission     Mission      @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  stationName String // Flight Dynamics, Range Safety, Weather, Vehicle, Recovery, FAA/Airspace
+  status      GoNoGoStatus @default(UNPOLLED)
+  updatedById String?
+  updatedBy   User?        @relation(fields: [updatedById], references: [id])
+  notes       String?
+  updatedAt   DateTime     @updatedAt
+  createdAt   DateTime     @default(now())
+
+  @@unique([missionId, stationName])
+}
+
+model MissionLogEntry {
+  id        String   @id @default(uuid())
+  missionId String
+  mission   Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  timestamp DateTime @default(now())
+  text      String
+
+  @@index([missionId])
+}
+
+// ---------------------------------------------------------------------------
+// FAA coordination
+// ---------------------------------------------------------------------------
+
+model COA {
+  id                  String    @id @default(uuid())
+  siteId              String
+  site                Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  coaNumber           String
+  issuingFacility     String
+  effectiveDate       DateTime
+  expirationDate      DateTime
+  authorizedActivity  String?
+  altitudeLimits      String?
+  conditions          String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([siteId])
+}
+
+model NOTAMFiling {
+  id                     String            @id @default(uuid())
+  missionId              String
+  mission                Mission           @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  filedDate              DateTime?
+  leidosConfirmationNumber String?
+  notamWindowOpen        DateTime?
+  notamWindowClose       DateTime?
+  filedById              String?
+  filedBy                User?             @relation(fields: [filedById], references: [id])
+  notes                  String?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  @@index([missionId])
+}
+
+model LaunchDayNotification {
+  id                String           @id @default(uuid())
+  missionId         String
+  mission           Mission          @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  notificationType  NotificationType
+  satisfied         Boolean          @default(false)
+  notApplicable     Boolean          @default(false)
+  contactedFacility String?
+  contactedById     String?
+  contactedBy       User?            @relation(fields: [contactedById], references: [id])
+  timestamp         DateTime?
+  notes             String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@unique([missionId, notificationType])
+}
+
+// ---------------------------------------------------------------------------
+// Documentation library
+// ---------------------------------------------------------------------------
+
+model Document {
+  id            String         @id @default(uuid())
+  title         String
+  category      String
+  siteId        String?
+  site          Site?          @relation(fields: [siteId], references: [id])
+  missionId     String?
+  mission       Mission?       @relation(fields: [missionId], references: [id])
+  status        DocumentStatus @default(DRAFT)
+  currentVersion Int           @default(1)
+  tags          String[]       @default([])
+  uploadedById  String
+  uploadedBy    User           @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
+  uploadedAt    DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  versions   DocumentVersion[]
+  auditLog   DocumentAuditEntry[]
+
+  @@index([category])
+  @@index([status])
+  @@index([siteId])
+  @@index([missionId])
+}
+
+model DocumentVersion {
+  id           String   @id @default(uuid())
+  documentId   String
+  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  version      Int
+  storageKey   String // S3 key or local relative path
+  fileName     String
+  mimeType     String
+  fileSizeBytes Int
+  uploadedById String
+  uploadedBy   User     @relation("DocumentVersionUploadedBy", fields: [uploadedById], references: [id])
+  uploadedAt   DateTime @default(now())
+  notes        String?
+
+  @@unique([documentId, version])
+}
+
+model DocumentAuditEntry {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String // VIEWED / DOWNLOADED / UPLOADED / EDITED / STATUS_CHANGED
+  timestamp  DateTime @default(now())
+  metadata   Json?
+
+  @@index([documentId])
+}
+
+// ---------------------------------------------------------------------------
+// System-wide audit log
+// ---------------------------------------------------------------------------
+
+model AuditLogEntry {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String
+  targetType String
+  targetId   String?
+  timestamp  DateTime @default(now())
+  metadata   Json?
+
+  @@index([targetType, targetId])
+  @@index([timestamp])
+}
