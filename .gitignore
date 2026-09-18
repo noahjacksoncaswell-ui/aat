@@ -10,3 +10,4 @@ server/prisma/dev.db
 coverage/
 .vscode/
 .idea/
+*.tsbuildinfo
