@@ -1,0 +1,71 @@
+@import "leaflet/dist/leaflet.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply text-slate-900 dark:text-slate-100;
+  font-family: "Segoe UI", "Inter", system-ui, -apple-system, sans-serif;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-400/50 dark:bg-slate-700 rounded-full;
+}
+
+/*
+ * Custom component classes must live in @layer components so Tailwind
+ * orders them BEFORE the utilities layer. Without this, a plain CSS rule
+ * declared after @tailwind utilities wins the cascade over utility
+ * override classes (e.g. bg-aat-navy) applied alongside it in a className,
+ * even though both are single-class specificity - silently breaking any
+ * element that combines .card with a background/text override.
+ */
+@layer components {
+  .status-pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-wide;
+  }
+  .status-go {
+    @apply bg-aat-go/15 text-aat-go border border-aat-go/40;
+  }
+  .status-caution {
+    @apply bg-aat-caution/15 text-aat-caution border border-aat-caution/40;
+  }
+  .status-nogo {
+    @apply bg-aat-nogo/15 text-aat-nogo border border-aat-nogo/40;
+  }
+  .status-neutral {
+    @apply bg-slate-400/15 text-slate-500 dark:text-slate-400 border border-slate-400/30;
+  }
+
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .input {
+    @apply w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-aat-accent dark:border-slate-700;
+  }
+
+  .btn-primary {
+    @apply rounded-md bg-aat-accent px-4 py-2 text-sm font-semibold text-white hover:bg-aat-accent/90;
+  }
+  .btn-secondary {
+    @apply rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800;
+  }
+  .btn-danger {
+    @apply rounded-md bg-aat-nogo px-4 py-2 text-sm font-semibold text-white hover:bg-aat-nogo/90;
+  }
+}
