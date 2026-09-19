@@ -7,6 +7,7 @@ import type {
   LwccState,
   Mission,
   MilestoneTemplate,
+  MilestoneTemplateOptions,
   Site,
   UserRecord,
   Vehicle,
@@ -102,8 +103,12 @@ export const recycleCountdown = (missionId: string, toMarkSeconds: number, reaso
   api.post(`/missions/${missionId}/countdown/recycle`, { toMarkSeconds, reason });
 export const markLiftoff = (missionId: string, timestamp?: string) =>
   api.post(`/missions/${missionId}/countdown/liftoff`, { timestamp });
-export const generateMilestoneSequence = (missionId: string) =>
-  api.post(`/missions/${missionId}/countdown/milestones/generate`).then((r) => r.data);
+export const fetchMilestoneTemplateOptions = (missionId: string) =>
+  api.get<MilestoneTemplateOptions>(`/missions/${missionId}/countdown/milestones/templates`).then((r) => r.data);
+export const generateMilestoneSequence = (missionId: string, templateId?: string) =>
+  api.post(`/missions/${missionId}/countdown/milestones/generate`, { templateId }).then((r) => r.data);
+export const resetMilestoneSequence = (missionId: string) =>
+  api.post(`/missions/${missionId}/countdown/milestones/reset`);
 
 // LWCC (Section 7)
 export const fetchLwccState = (missionId: string) => api.get<LwccState>(`/missions/${missionId}/lwcc`).then((r) => r.data);

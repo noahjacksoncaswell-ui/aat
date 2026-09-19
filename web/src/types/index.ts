@@ -314,7 +314,19 @@ export interface Mission {
   tCountStatus?: TCountStatus;
   holdOffsetSeconds?: number;
   liftoffActualTime?: string | null;
+  appliedMilestoneTemplateName?: string | null;
   updatedAt?: string;
+}
+
+export interface MilestoneTemplateOption {
+  id: string;
+  name: string;
+  itemCount: number;
+}
+
+export interface MilestoneTemplateOptions {
+  appliedTemplateName: string | null;
+  options: MilestoneTemplateOption[];
 }
 
 export interface Coa {

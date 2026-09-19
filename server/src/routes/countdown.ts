@@ -391,19 +391,95 @@ router.post("/liftoff", requireLaunchDirector, async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // Milestone sequence generation (Section 6.2.4) + vehicle-specific LCP tag
+// (v3.1 Item 3 - generated from a selected VLCP Milestone Template, the
+// standard/generic sequence being one such option rather than a separate
+// mechanism; v3.1 Item 2 - Reset clears it so a different template can be
+// applied)
 // ---------------------------------------------------------------------------
+
+const STANDARD_TEMPLATE_ID = "standard";
+
+router.get("/milestones/templates", requireConsole, async (req, res) => {
+  const mId = missionId(req);
+  const mission = await prisma.mission.findUnique({ where: { id: mId } });
+  if (!mission) return res.status(404).json({ error: "Mission not found" });
+
+  const templates = await prisma.milestoneTemplate.findMany({
+    where: { vehicleId: mission.vehicleId },
+    include: { items: { orderBy: { sortOrder: "asc" } } },
+  });
+
+  res.json({
+    appliedTemplateName: mission.appliedMilestoneTemplateName,
+    options: [
+      { id: STANDARD_TEMPLATE_ID, name: "Standard Countdown Sequence", itemCount: COUNTDOWN_MILESTONE_SEQUENCE.length },
+      ...templates.map((t) => ({ id: t.id, name: t.name, itemCount: t.items.length })),
+    ],
+  });
+});
+
+const generateSchema = z.object({ templateId: z.string().default(STANDARD_TEMPLATE_ID) });
 
 router.post("/milestones/generate", requireLaunchDirector, async (req, res) => {
   const mId = missionId(req);
+  const parsed = generateSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
   const existing = await prisma.missionMilestone.count({ where: { missionId: mId } });
   if (existing > 0) {
-    return res.status(400).json({ error: "Milestones already exist for this mission - remove them first if you need to regenerate" });
+    return res.status(400).json({ error: "Milestones already exist for this mission - use Reset Countdown Sequence first" });
   }
-  await prisma.missionMilestone.createMany({
-    data: COUNTDOWN_MILESTONE_SEQUENCE.map((item) => ({ missionId: mId, ...item })),
-  });
+
+  const mission = await prisma.mission.findUnique({ where: { id: mId } });
+  if (!mission) return res.status(404).json({ error: "Mission not found" });
+
+  let items: { phase?: string; label: string; responsibleStation?: string; tMinusSeconds: number; sortOrder: number }[];
+  let appliedName: string;
+
+  if (parsed.data.templateId === STANDARD_TEMPLATE_ID) {
+    items = COUNTDOWN_MILESTONE_SEQUENCE;
+    appliedName = "Standard Countdown Sequence";
+  } else {
+    const template = await prisma.milestoneTemplate.findUnique({
+      where: { id: parsed.data.templateId },
+      include: { items: { orderBy: { sortOrder: "asc" } } },
+    });
+    if (!template || template.vehicleId !== mission.vehicleId) {
+      return res.status(400).json({ error: "Template not found or not associated with this mission's vehicle" });
+    }
+    items = template.items.map((i) => ({ label: i.label, tMinusSeconds: i.tMinusSeconds, sortOrder: i.sortOrder }));
+    appliedName = template.name;
+  }
+
+  await prisma.$transaction([
+    prisma.missionMilestone.createMany({ data: items.map((item) => ({ missionId: mId, ...item })) }),
+    prisma.mission.update({ where: { id: mId }, data: { appliedMilestoneTemplateName: appliedName } }),
+  ]);
   broadcastMissionUpdate(mId);
-  res.status(201).json({ created: COUNTDOWN_MILESTONE_SEQUENCE.length });
+  res.status(201).json({ created: items.length, appliedTemplateName: appliedName });
+});
+
+router.post("/milestones/reset", requireLaunchDirector, async (req, res) => {
+  const mId = missionId(req);
+  const mission = await prisma.mission.findUnique({ where: { id: mId } });
+  if (!mission) return res.status(404).json({ error: "Mission not found" });
+
+  await prisma.$transaction([
+    prisma.missionMilestone.deleteMany({ where: { missionId: mId } }),
+    prisma.mission.update({ where: { id: mId }, data: { appliedMilestoneTemplateName: null } }),
+    prisma.missionHistoryEvent.create({
+      data: {
+        missionId: mId,
+        eventType: MissionHistoryEventType.NOTE,
+        actorId: req.user!.id,
+        notes: `Countdown milestone sequence reset (was: ${mission.appliedMilestoneTemplateName ?? "none"})`,
+      },
+    }),
+  ]);
+
+  await recordAudit({ userId: req.user!.id, action: "COUNTDOWN_SEQUENCE_RESET", targetType: "Mission", targetId: mId });
+  broadcastMissionUpdate(mId);
+  res.status(204).send();
 });
 
 export default router;

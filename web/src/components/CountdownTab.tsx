@@ -5,11 +5,13 @@ import {
   callHold,
   fetchCountdownState,
   fetchDocuments,
+  fetchMilestoneTemplateOptions,
   generateMilestoneSequence,
   markLiftoff,
   recycleCountdown,
   releaseHold,
   removeHold,
+  resetMilestoneSequence,
   reviseLot,
   submitLot,
   triggerHold,
@@ -371,10 +373,29 @@ function TimeControls({ mission, state, onRequestScrub }: { mission: Mission; st
 
 function MilestoneSequence({ mission }: { mission: Mission }) {
   const qc = useQueryClient();
-  const { isLaunchDirector } = useAuth();
+  const { isLaunchDirector, isAdmin } = useAuth();
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("standard");
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  const { data: templateOptions } = useQuery({
+    queryKey: ["milestone-templates", mission.id],
+    queryFn: () => fetchMilestoneTemplateOptions(mission.id),
+  });
+
   const generateMutation = useMutation({
-    mutationFn: () => generateMilestoneSequence(mission.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["mission", mission.id] }),
+    mutationFn: () => generateMilestoneSequence(mission.id, selectedTemplateId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["mission", mission.id] });
+      qc.invalidateQueries({ queryKey: ["milestone-templates", mission.id] });
+    },
+  });
+  const resetMutation = useMutation({
+    mutationFn: () => resetMilestoneSequence(mission.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["mission", mission.id] });
+      qc.invalidateQueries({ queryKey: ["milestone-templates", mission.id] });
+      setShowResetConfirm(false);
+    },
   });
   const updateMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => updateMilestone(mission.id, id, { status }),
@@ -382,17 +403,70 @@ function MilestoneSequence({ mission }: { mission: Mission }) {
   });
 
   const milestones = mission.milestones ?? [];
+  const canResetSequence = isAdmin || isLaunchDirector;
 
   return (
     <section className="card p-5">
       <div className="mb-3 flex items-center justify-between">
-        <div className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Countdown Milestone Sequence</div>
-        {isLaunchDirector && milestones.length === 0 && (
-          <button onClick={() => generateMutation.mutate()} className="btn-secondary text-xs">
-            Generate standard sequence
-          </button>
-        )}
+        <div>
+          <div className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Countdown Milestone Sequence</div>
+          {milestones.length > 0 && (
+            <div className="mt-1 text-[11px] text-slate-400">
+              Applied VLCP Milestone Template: <span className="text-slate-300">{mission.appliedMilestoneTemplateName ?? "Unknown"}</span>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {isLaunchDirector && milestones.length === 0 && (
+            <>
+              <select
+                value={selectedTemplateId}
+                onChange={(e) => setSelectedTemplateId(e.target.value)}
+                className="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-xs dark:border-slate-700"
+              >
+                {templateOptions?.options.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name} ({o.itemCount})
+                  </option>
+                ))}
+              </select>
+              <button onClick={() => generateMutation.mutate()} className="btn-secondary text-xs">
+                Generate Countdown Sequence
+              </button>
+            </>
+          )}
+          {canResetSequence && milestones.length > 0 && (
+            <button onClick={() => setShowResetConfirm(true)} className="rounded-md border border-red-800 px-2 py-1 text-xs font-semibold text-red-400 hover:bg-red-950/40">
+              Reset Countdown Sequence
+            </button>
+          )}
+        </div>
       </div>
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-red-900 bg-black p-6">
+            <h2 className="mb-2 text-lg font-bold text-red-400">Reset Countdown Sequence</h2>
+            <p className="mb-4 text-sm text-slate-300">
+              This will remove the currently generated milestone sequence for {mission.designator}
+              {mission.appliedMilestoneTemplateName ? ` (applied template: "${mission.appliedMilestoneTemplateName}")` : ""} and any recorded
+              verification / checkbox progress against it. This action cannot be undone. A new VLCP Milestone Template can be selected and
+              generated afterward.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowResetConfirm(false)} className="btn-secondary">
+                Cancel
+              </button>
+              <button
+                onClick={() => resetMutation.mutate()}
+                disabled={resetMutation.isPending}
+                className="rounded-md bg-red-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50"
+              >
+                Confirm Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {["PRE_OPERATION_SETUP", "COUNTDOWN"].map((phase) => {
         const items = milestones.filter((m) => (m.phase ?? "COUNTDOWN") === phase).sort((a, b) => b.tMinusSeconds - a.tMinusSeconds);
         if (items.length === 0) return null;
