@@ -19,6 +19,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { usePreferences } from "../context/PreferencesContext";
 import { tickTMinusSeconds } from "../utils/countdownMath";
+import { DocumentLink } from "./DocumentLink";
 import type { Mission, MissionHold } from "../types";
 
 function secondsToHms(totalSeconds: number): string {
@@ -458,15 +459,14 @@ function VehicleLcpCrossReference({ mission, isLaunchDirector }: { mission: Miss
       </div>
       <div className="space-y-1">
         {docs?.map((d) => (
-          <a
+          <DocumentLink
             key={d.id}
-            href={`/api/documents/${d.id}/versions/${d.currentVersion}/content`}
-            target="_blank"
-            rel="noreferrer"
+            documentId={d.id}
+            version={d.currentVersion}
             className="block rounded-md border border-slate-200 px-2 py-1.5 text-xs hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50"
           >
             {d.title} <span className="text-slate-400">v{d.currentVersion}</span>
-          </a>
+          </DocumentLink>
         ))}
         {docs?.length === 0 && <div className="text-xs text-slate-400">No vehicle-specific LCP on file for this mission.</div>}
       </div>

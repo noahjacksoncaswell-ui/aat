@@ -15,6 +15,7 @@ import { usePreferences } from "../context/PreferencesContext";
 import { formatTimestamp } from "../utils/time";
 import { StatusPill } from "../components/StatusPill";
 import { RequireRole } from "../components/RequireRole";
+import { DocumentLink } from "../components/DocumentLink";
 import { useAuth } from "../context/AuthContext";
 import { DOCUMENT_CATEGORIES } from "../types";
 import type { DocumentStatus } from "../types";
@@ -212,14 +213,9 @@ function DocumentPanel({ id, onClose }: { id: string; onClose: () => void }) {
 
       <div className="space-y-5 p-5">
         {latestVersion && (
-          <a
-            href={`/api/documents/${doc.id}/versions/${latestVersion.version}/content`}
-            target="_blank"
-            rel="noreferrer"
-            className="btn-primary block text-center"
-          >
+          <DocumentLink documentId={doc.id} version={latestVersion.version} className="btn-primary block text-center">
             Preview / Download Latest (v{latestVersion.version})
-          </a>
+          </DocumentLink>
         )}
 
         <RequireRole roles={["ADMIN", "LAUNCH_DIRECTOR"]}>
@@ -243,18 +239,17 @@ function DocumentPanel({ id, onClose }: { id: string; onClose: () => void }) {
           <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Version History</div>
           <div className="space-y-2">
             {doc.versions?.map((v) => (
-              <a
+              <DocumentLink
                 key={v.id}
-                href={`/api/documents/${doc.id}/versions/${v.version}/content`}
-                target="_blank"
-                rel="noreferrer"
+                documentId={doc.id}
+                version={v.version}
                 className="block rounded-md border border-slate-200 p-2 text-xs hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50"
               >
                 v{v.version} · {v.fileName} · {(v.fileSizeBytes / 1024).toFixed(0)} KB
                 <div className="text-slate-400">
                   {v.uploadedBy.name} · {formatTimestamp(v.uploadedAt, useZulu)}
                 </div>
-              </a>
+              </DocumentLink>
             ))}
           </div>
           <RequireRole roles={["ADMIN", "LAUNCH_DIRECTOR", "OPERATOR"]}>

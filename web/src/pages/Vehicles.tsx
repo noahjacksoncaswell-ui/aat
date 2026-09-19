@@ -12,6 +12,7 @@ import { usePreferences } from "../context/PreferencesContext";
 import { formatDateOnly } from "../utils/time";
 import { StatusPill, missionStatusTone } from "../components/StatusPill";
 import { RequireRole } from "../components/RequireRole";
+import { DocumentLink, DocumentImage } from "../components/DocumentLink";
 import type { Vehicle } from "../types";
 
 export default function Vehicles() {
@@ -299,27 +300,22 @@ function VehicleDetail({ vehicleId, onClose }: { vehicleId: string; onClose: () 
               {photos.length > 0 && (
                 <div className="mb-3 grid grid-cols-3 gap-2">
                   {photos.map((p) => (
-                    <a key={p.id} href={`/api/documents/${p.id}/versions/${p.currentVersion}/content`} target="_blank" rel="noreferrer">
-                      <img
-                        src={`/api/documents/${p.id}/versions/${p.currentVersion}/content`}
-                        alt={p.title}
-                        className="h-20 w-full rounded-md object-cover"
-                      />
-                    </a>
+                    <DocumentLink key={p.id} documentId={p.id} version={p.currentVersion} className="block">
+                      <DocumentImage documentId={p.id} version={p.currentVersion} alt={p.title} className="h-20 w-full rounded-md object-cover" />
+                    </DocumentLink>
                   ))}
                 </div>
               )}
               <div className="space-y-1">
                 {otherDocs.map((d) => (
-                  <a
+                  <DocumentLink
                     key={d.id}
-                    href={`/api/documents/${d.id}/versions/${d.currentVersion}/content`}
-                    target="_blank"
-                    rel="noreferrer"
+                    documentId={d.id}
+                    version={d.currentVersion}
                     className="block rounded-md border border-slate-200 px-2 py-1.5 text-xs hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50"
                   >
                     {d.title} <span className="text-slate-400">v{d.currentVersion}</span>
-                  </a>
+                  </DocumentLink>
                 ))}
                 {vehicle.documents?.length === 0 && <p className="text-xs text-slate-400">No documents on file.</p>}
               </div>
