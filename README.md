@@ -4,7 +4,10 @@ Single source of truth for AAT's Launch Operations Division: launch site
 geospatial/weather intelligence, mission scheduling and countdown tracking,
 FAA/airspace authorization compliance, and launch documentation management.
 
-Built against `AAT LOD Platform — Technical Build Specification v2.0`.
+Built against `AAT LOD Platform — Technical Build Specification v2.0`, revised
+per `Revision Directive v3.0` (visual system, mission action logic, the LWCC
+weather-commit module, the Vehicle Registry, and the L-COUNT/T-COUNT/P-COUNT
+countdown system).
 
 ## Stack
 
@@ -79,6 +82,35 @@ npm run dev                # http://localhost:5173 (proxies /api and /socket.io 
   mission log entries, document uploads.
 - **Viewer** — read-only.
 
+## Revision Directive v3.0 highlights
+
+- **Mission actions** (`server/src/routes/missions.ts`): Postpone Indefinitely
+  voids every open Launch Period entry, not just the targeted one; Cancel is
+  available at any status short of Successful and requires typing the mission
+  designator (checked server-side, not just in the UI) as a second
+  confirmation; Scrub is gated to the day of a confirmed target and resets
+  the countdown reference atomically in the same transaction as the scrub.
+- **Countdown system** (`server/src/routes/countdown.ts`,
+  `server/src/services/countdown.ts`): the L-COUNT/T-COUNT/P-COUNT three-clock
+  model, LOT submission/revision, programmed and called holds, recycle, and
+  mark-liftoff. T-COUNT is hold-aware and "drifts" later by exactly the
+  realized duration of every released hold, the way a real procedure-driven
+  clock does; the frontend ticks it locally between polls of `/countdown/state`.
+- **LWCC module** (`server/src/services/lwcc.ts`, `server/src/routes/lwcc.ts`,
+  `web/src/components/LwccTab.tsx`): LWCCR 3–22 requirement definitions, live
+  evaluation against station weather for measurable parameters, manual
+  reporting for requirements needing human observation, timed holds, a
+  compliance banner, a permanently-retained activity log (clearing it only
+  clears the visible view, per `Mission.lwccLogClearedAt`), and a
+  justification-gated override.
+- **Vehicle Registry** (`web/src/pages/Vehicles.tsx`): reuses the Documentation
+  Library's storage for the photo/schematic gallery (`Document.vehicleId`)
+  rather than a separate upload mechanism.
+- **Visual system**: dark-mode-only (no toggle, no `prefers-color-scheme`
+  handling), zero border radius enforced at the Tailwind theme-token level,
+  and color restricted to four fixed status tones plus a restrained red for
+  destructive actions - see `web/tailwind.config.js` and `web/src/index.css`.
+
 ## Notable design decisions
 
 - **Document storage** abstracts over S3 vs. local disk (`server/src/services/storage.ts`)
@@ -106,3 +138,15 @@ npm run dev                # http://localhost:5173 (proxies /api and /socket.io 
 - FAA airspace class boundary map overlays (spec notes no public real-time COA
   API exists yet; COA data is intentionally architected as manually-entered
   with automatic date-based status evaluation, ready for a future feed).
+- LWCC live evaluation uses NWS current-conditions data as a practical proxy
+  for parameters the standard defines geometrically (precipitation/lightning
+  *proximity*, cloud *coverage and vertical extent*) - there is no upper-air
+  or radar feed wired in, so those rows are intentionally MANUAL (station-
+  reported) rather than live. See the header comment in `server/src/services/lwcc.ts`.
+- Dark mode's toggle, `matchMedia` check, and stored preference are fully
+  removed (Section 1.7), but some components still pair a light-mode Tailwind
+  utility with its `dark:` override in the same className (e.g.
+  `bg-white dark:bg-slate-900`) rather than a single unprefixed class. Since
+  `dark` is now permanently set on `<html>`, the light-mode utility never
+  renders and is dead weight, not a behavioral gap - a mechanical follow-up
+  pass could collapse these to single classes if desired.
