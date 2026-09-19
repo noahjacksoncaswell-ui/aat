@@ -106,6 +106,12 @@ enum VehicleStatus {
   RETIRED
 }
 
+// Revision Directive v3.1 Item 4
+enum SiteOwnership {
+  COMPANY_OWNED
+  THIRD_PARTY_LEASED
+}
+
 enum CoaStatus {
   ACTIVE
   EXPIRED
@@ -219,28 +225,29 @@ model UserMissionAssignment {
 // ---------------------------------------------------------------------------
 
 model Site {
-  id                       String     @id @default(uuid())
+  id                       String        @id @default(uuid())
   name                     String
-  designator               String     @unique
+  designator               String        @unique
   lat                      Float
   lon                      Float
   elevationMeters          Float?
-  status                   SiteStatus @default(STANDBY)
-  type                     SiteType   @default(FIXED_PAD)
+  status                   SiteStatus    @default(STANDBY)
+  type                     SiteType      @default(FIXED_PAD)
+  ownership                SiteOwnership @default(COMPANY_OWNED)
   ownershipNotes           String?
   jurisdictionNotes        String?
   nearestPopulationCenters String?
   nearestWaterBodies       String?
   terrainType              String?
-  countryCode              String     @default("US")
+  countryCode              String        @default("US")
   // FAA facility cross-reference (Revision Directive v3.0 Section 6.4) - populated
   // once per site so mission FAA & NOTAM tabs don't require re-entry per mission.
   traconFacilityName       String?
   traconPhone              String?
   artccFacilityName        String?
   artccPhone               String?
-  createdAt                DateTime   @default(now())
-  updatedAt                DateTime   @updatedAt
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
 
   photos         SitePhoto[]
   missions       Mission[]
@@ -287,6 +294,7 @@ model Vehicle {
   id                 String        @id @default(uuid())
   // Identification
   name               String
+  description        String?
   type               String?
   designator         String? // tail number
   vehicleClass       String? // class/type designation
@@ -400,6 +408,12 @@ model Mission {
   tCountStatus      TCountStatus @default(PENDING)
   holdOffsetSeconds Int          @default(0)
   liftoffActualTime DateTime? // set by ESTABLISH ACTUAL LAUNCH TIME (MARK LIFTOFF)
+
+  // v3.1 Item 3 - which VLCP Milestone Template (or the standard/generic
+  // sequence) the currently-generated milestones were produced from. Stored
+  // as a display name rather than a strict FK because "Standard Countdown
+  // Sequence" is not a real MilestoneTemplate row.
+  appliedMilestoneTemplateName String?
 
   lwccLogClearedAt DateTime? // Section 7.5 - display-only clear; rows are never deleted
 

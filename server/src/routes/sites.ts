@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { SiteStatus, SiteType } from "@prisma/client";
+import { SiteStatus, SiteType, SiteOwnership } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { requireAdmin } from "../middleware/auth";
 import { recordAudit } from "../services/audit";
@@ -9,15 +9,29 @@ import { computeCoaStatus } from "../services/faa";
 
 const router = Router();
 
+const LANDOWNER_AUTH_CATEGORY = "Landowner Authorization";
+
 router.get("/", async (_req, res) => {
   const sites = await prisma.site.findMany({ orderBy: { name: "asc" } });
   const coas = await prisma.cOA.findMany();
+  // Item 4 - the Landowner Authorization badge is computed, not manually
+  // toggled: it reflects whether a Documentation Library entry tagged
+  // "Landowner Authorization" exists for this site.
+  const landownerDocs = await prisma.document.findMany({
+    where: { category: LANDOWNER_AUTH_CATEGORY, siteId: { in: sites.map((s) => s.id) } },
+    select: { siteId: true },
+  });
+  const sitesWithLandownerDoc = new Set(landownerDocs.map((d) => d.siteId));
   const withStatus = sites.map((site) => {
     const siteCoas = coas.filter((c) => c.siteId === site.id);
     const best = siteCoas
       .map((c) => ({ c, status: computeCoaStatus(c) }))
       .sort((a, b) => (a.status === "ACTIVE" ? -1 : 1))[0];
-    return { ...site, coaStatus: best ? best.status : "NOT_ON_FILE" };
+    return {
+      ...site,
+      coaStatus: best ? best.status : "NOT_ON_FILE",
+      landownerAuthorizationStatus: sitesWithLandownerDoc.has(site.id) ? "ON_FILE" : "NOT_ON_FILE",
+    };
   });
   res.json(withStatus);
 });
@@ -28,7 +42,8 @@ router.get("/:id", async (req, res) => {
     include: { photos: true, coas: true, assignedUsers: { include: { user: { select: { id: true, name: true, role: true } } } } },
   });
   if (!site) return res.status(404).json({ error: "Site not found" });
-  res.json(site);
+  const landownerDoc = await prisma.document.findFirst({ where: { category: LANDOWNER_AUTH_CATEGORY, siteId: site.id } });
+  res.json({ ...site, landownerAuthorizationStatus: landownerDoc ? "ON_FILE" : "NOT_ON_FILE" });
 });
 
 router.get("/:id/weather", async (req, res) => {
@@ -53,6 +68,7 @@ const siteSchema = z.object({
   elevationMeters: z.number().optional().nullable(),
   status: z.nativeEnum(SiteStatus).optional(),
   type: z.nativeEnum(SiteType).optional(),
+  ownership: z.nativeEnum(SiteOwnership).optional(),
   ownershipNotes: z.string().optional().nullable(),
   jurisdictionNotes: z.string().optional().nullable(),
   nearestPopulationCenters: z.string().optional().nullable(),

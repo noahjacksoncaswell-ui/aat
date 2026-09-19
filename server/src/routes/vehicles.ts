@@ -48,6 +48,7 @@ router.get("/:id", async (req, res) => {
 
 const vehicleSchema = z.object({
   name: z.string().min(1),
+  description: z.string().optional().nullable(),
   type: z.string().optional().nullable(),
   designator: z.string().optional().nullable(),
   vehicleClass: z.string().optional().nullable(),

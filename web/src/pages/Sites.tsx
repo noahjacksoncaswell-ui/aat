@@ -152,12 +152,18 @@ function SiteDetailPanel({ siteId, onClose }: { siteId: string; onClose: () => v
           </StatusPill>
           <StatusPill tone={coaStatusTone(bestCoaStatus)}>COA: {bestCoaStatus.replace("_", " ")}</StatusPill>
           <span className="status-pill status-neutral">{site.type.replace("_", " ")}</span>
+          <span className="status-pill status-neutral">{site.ownership === "THIRD_PARTY_LEASED" ? "THIRD-PARTY LEASED" : "COMPANY-OWNED"}</span>
+          {site.ownership === "THIRD_PARTY_LEASED" && (
+            <StatusPill tone={site.landownerAuthorizationStatus === "ON_FILE" ? "go" : "nogo"}>
+              Landowner Authorization: {site.landownerAuthorizationStatus === "ON_FILE" ? "ON FILE" : "NOT ON FILE"}
+            </StatusPill>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3 text-sm">
           <Field label="Coordinates" value={`${site.lat.toFixed(4)}, ${site.lon.toFixed(4)}`} />
           <Field label="Elevation" value={site.elevationMeters != null ? `${site.elevationMeters} m MSL` : "--"} />
-          <Field label="Ownership" value={site.ownershipNotes || "--"} span2 />
+          <Field label="Ownership notes" value={site.ownershipNotes || "--"} span2 />
           <Field label="Jurisdiction" value={site.jurisdictionNotes || "--"} span2 />
         </div>
 
@@ -267,6 +273,7 @@ function EditSiteForm({ site, onDone }: { site: Site; onDone: () => void }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
     status: site.status,
+    ownership: site.ownership ?? "COMPANY_OWNED",
     ownershipNotes: site.ownershipNotes ?? "",
     jurisdictionNotes: site.jurisdictionNotes ?? "",
     terrainType: site.terrainType ?? "",
@@ -292,6 +299,17 @@ function EditSiteForm({ site, onDone }: { site: Site; onDone: () => void }) {
         {["ACTIVE", "STANDBY", "UNDER_CONSTRUCTION", "DECOMMISSIONED"].map((s) => (
           <option key={s} value={s}>
             {s.replace("_", " ")}
+          </option>
+        ))}
+      </select>
+      <select
+        value={form.ownership}
+        onChange={(e) => setForm({ ...form, ownership: e.target.value as any })}
+        className="w-full rounded-md border border-slate-300 bg-transparent px-2 py-1 text-xs dark:border-slate-700"
+      >
+        {["COMPANY_OWNED", "THIRD_PARTY_LEASED"].map((o) => (
+          <option key={o} value={o}>
+            {o.replace(/_/g, " ")}
           </option>
         ))}
       </select>
@@ -329,6 +347,7 @@ function NewSiteModal({ onClose }: { onClose: () => void }) {
     elevationMeters: "",
     type: "FIXED_PAD",
     status: "STANDBY",
+    ownership: "COMPANY_OWNED",
   });
   const mutation = useMutation({
     mutationFn: () =>
@@ -340,6 +359,7 @@ function NewSiteModal({ onClose }: { onClose: () => void }) {
         elevationMeters: form.elevationMeters ? Number(form.elevationMeters) : null,
         type: form.type as any,
         status: form.status as any,
+        ownership: form.ownership as any,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sites"] });
@@ -373,6 +393,13 @@ function NewSiteModal({ onClose }: { onClose: () => void }) {
             {["FIXED_PAD", "MOBILE_TEL", "MARINE_PLATFORM", "OTHER"].map((t) => (
               <option key={t} value={t}>
                 {t.replace("_", " ")}
+              </option>
+            ))}
+          </select>
+          <select value={form.ownership} onChange={(e) => setForm({ ...form, ownership: e.target.value })} className="input">
+            {["COMPANY_OWNED", "THIRD_PARTY_LEASED"].map((o) => (
+              <option key={o} value={o}>
+                {o.replace(/_/g, " ")}
               </option>
             ))}
           </select>

@@ -1,21 +1,14 @@
 import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  createMilestoneTemplate,
-  createUser,
-  createVehicle,
-  deactivateUser,
-  fetchActivityLog,
-  fetchSites,
-  fetchUsers,
-  fetchVehicles,
-  updateUser,
-} from "../api/resources";
+import { createUser, deactivateUser, fetchActivityLog, fetchSites, fetchUsers, updateUser } from "../api/resources";
 import { usePreferences } from "../context/PreferencesContext";
 import { formatTimestamp } from "../utils/time";
 import { StatusPill } from "../components/StatusPill";
 
-const TABS = ["Users", "Vehicles & Templates", "Activity Log"] as const;
+// Vehicle and VLCP Milestone Template management live entirely under the
+// Vehicles tab (v3.1 Item 6) - Admin is reserved for administrative
+// functions (users, sites, COAs, system activity) only.
+const TABS = ["Users", "Activity Log"] as const;
 
 export default function Admin() {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Users");
@@ -41,7 +34,6 @@ export default function Admin() {
       </div>
 
       {tab === "Users" && <UsersTab />}
-      {tab === "Vehicles & Templates" && <VehiclesTab />}
       {tab === "Activity Log" && <ActivityTab />}
     </div>
   );
@@ -193,174 +185,6 @@ function UsersTab() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function VehiclesTab() {
-  const qc = useQueryClient();
-  const { data: vehicles } = useQuery({ queryKey: ["vehicles"], queryFn: fetchVehicles });
-  const [showNewVehicle, setShowNewVehicle] = useState(false);
-  const [vehicleForm, setVehicleForm] = useState({ name: "", type: "", windMaxKts: "", ceilingMinFt: "", maxPrecipProbability: "" });
-
-  const createVehicleMutation = useMutation({
-    mutationFn: () =>
-      createVehicle({
-        name: vehicleForm.name,
-        type: vehicleForm.type,
-        windMaxKts: vehicleForm.windMaxKts ? Number(vehicleForm.windMaxKts) : null,
-        ceilingMinFt: vehicleForm.ceilingMinFt ? Number(vehicleForm.ceilingMinFt) : null,
-        maxPrecipProbability: vehicleForm.maxPrecipProbability ? Number(vehicleForm.maxPrecipProbability) : null,
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vehicles"] });
-      setShowNewVehicle(false);
-      setVehicleForm({ name: "", type: "", windMaxKts: "", ceilingMinFt: "", maxPrecipProbability: "" });
-    },
-  });
-
-  return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <button onClick={() => setShowNewVehicle(true)} className="btn-primary">
-          + New Vehicle
-        </button>
-      </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {vehicles?.map((v) => (
-          <div key={v.id} className="card p-5">
-            <div className="text-lg font-semibold">{v.name}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">{v.type}</div>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-              <div>Max wind: {v.windMaxKts ?? "--"} kt</div>
-              <div>Min ceiling: {v.ceilingMinFt ?? "--"} ft</div>
-              <div>Max precip prob: {v.maxPrecipProbability ?? "--"}%</div>
-              <div>Lightning radius: {v.lightningRadiusMi ?? "--"} mi</div>
-            </div>
-            <div className="mt-3">
-              <div className="text-xs font-semibold uppercase text-slate-500">Milestone Templates</div>
-              {v.templates?.length ? (
-                v.templates.map((t) => (
-                  <div key={t.id} className="mt-1 rounded-md border border-slate-200 p-2 text-xs dark:border-slate-800">
-                    <div className="font-medium">{t.name}</div>
-                    <div className="text-slate-500 dark:text-slate-400">{t.items.length} milestones</div>
-                  </div>
-                ))
-              ) : (
-                <div className="mt-1 text-xs text-slate-400">No templates yet.</div>
-              )}
-              <NewTemplateInline vehicleId={v.id} />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {showNewVehicle && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
-            <h2 className="mb-4 text-lg font-bold">New Vehicle</h2>
-            <div className="space-y-3">
-              <input placeholder="Name" value={vehicleForm.name} onChange={(e) => setVehicleForm({ ...vehicleForm, name: e.target.value })} className="input" />
-              <input placeholder="Type" value={vehicleForm.type} onChange={(e) => setVehicleForm({ ...vehicleForm, type: e.target.value })} className="input" />
-              <div className="grid grid-cols-3 gap-2">
-                <input
-                  placeholder="Max wind (kt)"
-                  value={vehicleForm.windMaxKts}
-                  onChange={(e) => setVehicleForm({ ...vehicleForm, windMaxKts: e.target.value })}
-                  className="input"
-                />
-                <input
-                  placeholder="Min ceiling (ft)"
-                  value={vehicleForm.ceilingMinFt}
-                  onChange={(e) => setVehicleForm({ ...vehicleForm, ceilingMinFt: e.target.value })}
-                  className="input"
-                />
-                <input
-                  placeholder="Max precip %"
-                  value={vehicleForm.maxPrecipProbability}
-                  onChange={(e) => setVehicleForm({ ...vehicleForm, maxPrecipProbability: e.target.value })}
-                  className="input"
-                />
-              </div>
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setShowNewVehicle(false)} className="btn-secondary">
-                Cancel
-              </button>
-              <button onClick={() => createVehicleMutation.mutate()} disabled={!vehicleForm.name} className="btn-primary disabled:opacity-50">
-                Create
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NewTemplateInline({ vehicleId }: { vehicleId: string }) {
-  const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [items, setItems] = useState([{ label: "", tMinusSeconds: 0 }]);
-
-  const mutation = useMutation({
-    mutationFn: () => createMilestoneTemplate(vehicleId, { name, items: items.filter((i) => i.label) as any }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vehicles"] });
-      setOpen(false);
-      setName("");
-      setItems([{ label: "", tMinusSeconds: 0 }]);
-    },
-  });
-
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)} className="mt-2 text-xs font-semibold text-aat-accent hover:underline">
-        + Add template
-      </button>
-    );
-  }
-
-  return (
-    <div className="mt-2 space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-800">
-      <input placeholder="Template name" value={name} onChange={(e) => setName(e.target.value)} className="input" />
-      {items.map((item, idx) => (
-        <div key={idx} className="grid grid-cols-[1fr_100px] gap-1">
-          <input
-            placeholder="Milestone label"
-            value={item.label}
-            onChange={(e) => {
-              const next = [...items];
-              next[idx] = { ...next[idx], label: e.target.value };
-              setItems(next);
-            }}
-            className="input"
-          />
-          <input
-            type="number"
-            placeholder="T-minus (s)"
-            value={item.tMinusSeconds}
-            onChange={(e) => {
-              const next = [...items];
-              next[idx] = { ...next[idx], tMinusSeconds: Number(e.target.value) };
-              setItems(next);
-            }}
-            className="input"
-          />
-        </div>
-      ))}
-      <button onClick={() => setItems([...items, { label: "", tMinusSeconds: 0 }])} className="text-xs text-aat-accent hover:underline">
-        + Add milestone
-      </button>
-      <div className="flex justify-end gap-2">
-        <button onClick={() => setOpen(false)} className="text-xs">
-          Cancel
-        </button>
-        <button onClick={() => mutation.mutate()} disabled={!name} className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-black disabled:opacity-50">
-          Save template
-        </button>
-      </div>
     </div>
   );
 }

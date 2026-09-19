@@ -19,6 +19,9 @@ export type SiteStatus = "ACTIVE" | "STANDBY" | "UNDER_CONSTRUCTION" | "DECOMMIS
 export type SiteType = "FIXED_PAD" | "MOBILE_TEL" | "MARINE_PLATFORM" | "OTHER";
 export type CoaComputedStatus = "ACTIVE" | "EXPIRED" | "PENDING" | "NOT_ON_FILE";
 
+export type SiteOwnership = "COMPANY_OWNED" | "THIRD_PARTY_LEASED";
+export type LandownerAuthorizationStatus = "ON_FILE" | "NOT_ON_FILE";
+
 export interface Site {
   id: string;
   name: string;
@@ -28,6 +31,7 @@ export interface Site {
   elevationMeters?: number | null;
   status: SiteStatus;
   type: SiteType;
+  ownership: SiteOwnership;
   ownershipNotes?: string | null;
   jurisdictionNotes?: string | null;
   nearestPopulationCenters?: string | null;
@@ -39,6 +43,7 @@ export interface Site {
   artccFacilityName?: string | null;
   artccPhone?: string | null;
   coaStatus?: CoaComputedStatus;
+  landownerAuthorizationStatus?: LandownerAuthorizationStatus;
   photos?: SitePhoto[];
   coas?: Coa[];
 }
@@ -68,6 +73,7 @@ export type VehicleStatus = "ACTIVE" | "IN_DEVELOPMENT" | "RETIRED";
 export interface Vehicle {
   id: string;
   name: string;
+  description?: string | null;
   type?: string | null;
   designator?: string | null;
   vehicleClass?: string | null;
@@ -407,6 +413,7 @@ export const DOCUMENT_CATEGORIES = [
   "Flight Termination System (FTS) Documentation",
   "Launch/Flight Readiness Review (LRR/FRR)",
   "Environmental/Permitting",
+  "Landowner Authorization",
   "Vehicle Certification & Test Data",
   "FAA Correspondence / COA / NOTAM",
   "Weather Waiver Request",

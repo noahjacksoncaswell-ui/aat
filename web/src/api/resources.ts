@@ -35,6 +35,8 @@ export const updateVehicle = (id: string, data: Partial<Vehicle>) => api.patch(`
 export const deleteVehicle = (id: string) => api.delete(`/vehicles/${id}`);
 export const createMilestoneTemplate = (vehicleId: string, data: Partial<MilestoneTemplate>) =>
   api.post(`/vehicles/${vehicleId}/templates`, data).then((r) => r.data);
+export const deleteMilestoneTemplate = (vehicleId: string, templateId: string) =>
+  api.delete(`/vehicles/${vehicleId}/templates/${templateId}`);
 
 // Missions
 export interface MissionFilters {
