@@ -87,12 +87,32 @@ router.post("/lot", requireLaunchDirector, async (req, res) => {
   const windowError = validateLotWindow(lot, targeted);
   if (windowError) return res.status(400).json({ error: windowError });
 
-  const { lot: _lot, ...notes } = parsed.data;
+  // Request/response field names stay unprefixed (matching the frontend
+  // form and the wire contract); only the Mission model's columns carry the
+  // `lot`-prefix, so the mapping happens here, once, rather than renaming
+  // either side of the API.
+  const {
+    vehicleReadinessNotes,
+    rangeAvailabilityNotes,
+    meteorologicalOutlookNotes,
+    scheduleConstraintsNotes,
+    safetyRegulatoryNotes,
+  } = parsed.data;
 
   await prisma.$transaction(async (tx) => {
     await tx.mission.update({
       where: { id: mission.id },
-      data: { lot, lotSubmittedAt: new Date(), tCountStatus: "COUNTING", holdOffsetSeconds: 0, ...notes },
+      data: {
+        lot,
+        lotSubmittedAt: new Date(),
+        tCountStatus: "COUNTING",
+        holdOffsetSeconds: 0,
+        lotVehicleReadinessNotes: vehicleReadinessNotes,
+        lotRangeAvailabilityNotes: rangeAvailabilityNotes,
+        lotMeteorologicalOutlookNotes: meteorologicalOutlookNotes,
+        lotScheduleConstraintsNotes: scheduleConstraintsNotes,
+        lotSafetyRegulatoryNotes: safetyRegulatoryNotes,
+      },
     });
     await tx.missionHistoryEvent.create({
       data: { missionId: mission.id, eventType: MissionHistoryEventType.LOT_SUBMITTED, actorId: req.user!.id, notes: `LOT established: ${lot.toISOString()}` },
