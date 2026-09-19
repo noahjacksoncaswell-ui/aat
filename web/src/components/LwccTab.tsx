@@ -169,7 +169,7 @@ export default function LwccTab({ missionId }: { missionId: string }) {
 
       {confirmClear && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
             <h2 className="mb-2 text-lg font-bold">Clear LWCC Activity Log</h2>
             <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
               This clears the visible working log only. Every underlying report, violation, hold, and override remains permanently retained in the
@@ -205,7 +205,7 @@ function ReportModal({ missionId, row, onClose }: { missionId: string; row: Lwcc
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
         <h2 className="mb-1 text-lg font-bold">Report LWCCR {row.no}</h2>
         <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{row.limitText}</p>
         <div className="space-y-3">
@@ -246,7 +246,7 @@ function OverrideModal({ missionId, row, onClose }: { missionId: string; row: Lw
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
         <h2 className="mb-2 text-lg font-bold text-aat-nogo">Override LWCCR {row.no}</h2>
         <p className="mb-3 text-sm text-slate-600 dark:text-slate-300">
           Overriding a Launch Weather Commit Criterion bypasses a safety-critical gate. Per APC-STD-23-01 §3.1.2, the Launch Director must have

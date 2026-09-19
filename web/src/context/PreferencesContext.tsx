@@ -1,40 +1,25 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 
 interface PreferencesContextValue {
-  darkMode: boolean;
-  toggleDarkMode: () => void;
   useZulu: boolean;
   toggleZulu: () => void;
 }
 
 const PreferencesContext = createContext<PreferencesContextValue | undefined>(undefined);
 
+// Dark mode is the only theme this application has (Revision Directive v3.0
+// Section 1.7) - there is no toggle, no stored preference, and no
+// prefers-color-scheme handling. The `dark` class is set once in
+// index.html and never changes.
 export function PreferencesProvider({ children }: { children: React.ReactNode }) {
-  const [darkMode, setDarkMode] = useState<boolean>(() => {
-    const stored = localStorage.getItem("aat_dark_mode");
-    if (stored != null) return stored === "true";
-    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true;
-  });
   const [useZulu, setUseZulu] = useState<boolean>(() => localStorage.getItem("aat_use_zulu") !== "false");
-
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", darkMode);
-    localStorage.setItem("aat_dark_mode", String(darkMode));
-  }, [darkMode]);
 
   useEffect(() => {
     localStorage.setItem("aat_use_zulu", String(useZulu));
   }, [useZulu]);
 
   return (
-    <PreferencesContext.Provider
-      value={{
-        darkMode,
-        toggleDarkMode: () => setDarkMode((d) => !d),
-        useZulu,
-        toggleZulu: () => setUseZulu((z) => !z),
-      }}
-    >
+    <PreferencesContext.Provider value={{ useZulu, toggleZulu: () => setUseZulu((z) => !z) }}>
       {children}
     </PreferencesContext.Provider>
   );

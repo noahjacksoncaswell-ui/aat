@@ -29,12 +29,11 @@ export default function Missions() {
       <header className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Mission Schedule</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">All AAT missions, launch periods, and status.</p>
         </div>
         <RequireRole roles={["ADMIN", "LAUNCH_DIRECTOR"]}>
           <button
             onClick={() => setShowNew(true)}
-            className="rounded-md bg-aat-accent px-4 py-2 text-sm font-semibold text-white hover:bg-aat-accent/90"
+            className="rounded-md bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200"
           >
             + New Mission
           </button>
@@ -151,7 +150,7 @@ function NewMissionModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 dark:bg-slate-900">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-800 bg-black p-6">
         <h2 className="mb-4 text-lg font-bold">New Mission</h2>
         <div className="space-y-3">
           <input placeholder="Mission name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input" />
@@ -237,7 +236,7 @@ function NewMissionModal({ onClose }: { onClose: () => void }) {
           <button
             onClick={() => mutation.mutate()}
             disabled={!form.name || !form.designator || !form.vehicleId || !form.siteId || mutation.isPending}
-            className="rounded-md bg-aat-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="rounded-md bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
           >
             Create Mission
           </button>

@@ -239,7 +239,7 @@ function HoldManagement({ mission, state, isLaunchDirector }: { mission: Mission
 
       {showCall && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
             <h2 className="mb-3 text-lg font-bold">Call Hold</h2>
             <textarea value={callReason} onChange={(e) => setCallReason(e.target.value)} placeholder="Reason (required)" className="input" rows={3} />
             <div className="mt-4 flex justify-end gap-2">
@@ -329,7 +329,7 @@ function TimeControls({ mission, state, onRequestScrub }: { mission: Mission; st
 
       {showRevise && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
             <h2 className="mb-3 text-lg font-bold">Select New Time Within Window</h2>
             <input type="datetime-local" value={reviseForm.lot} onChange={(e) => setReviseForm({ ...reviseForm, lot: e.target.value })} className="input mb-2" />
             <textarea value={reviseForm.reason} onChange={(e) => setReviseForm({ ...reviseForm, reason: e.target.value })} placeholder="Reason (required)" className="input" rows={2} />
@@ -348,7 +348,7 @@ function TimeControls({ mission, state, onRequestScrub }: { mission: Mission; st
 
       {showRecycle && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
             <h2 className="mb-3 text-lg font-bold">Recycle to Mark</h2>
             <input value={recycleForm.toMark} onChange={(e) => setRecycleForm({ ...recycleForm, toMark: e.target.value })} placeholder="Target T-mark HH:MM:SS" className="input mb-2" />
             <textarea value={recycleForm.reason} onChange={(e) => setRecycleForm({ ...recycleForm, reason: e.target.value })} placeholder="Reason (required)" className="input" rows={2} />
@@ -473,7 +473,7 @@ function VehicleLcpCrossReference({ mission, isLaunchDirector }: { mission: Miss
       {isLaunchDirector && (
         <div className="mt-2 flex gap-2">
           <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="flex-1 text-xs" />
-          <button onClick={() => file && uploadMutation.mutate()} disabled={!file} className="rounded-md bg-aat-accent px-2 py-1 text-xs font-semibold text-white disabled:opacity-50">
+          <button onClick={() => file && uploadMutation.mutate()} disabled={!file} className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-black disabled:opacity-50">
             Upload LCP
           </button>
         </div>

@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap");
 @import "leaflet/dist/leaflet.css";
 
 @tailwind base;
@@ -10,9 +11,11 @@ body,
   height: 100%;
 }
 
+/* Dark mode is the only theme this application has (Revision Directive
+   v3.0 Section 1.7) - no prefers-color-scheme handling, no light-theme
+   variables. The `dark` class is applied once, permanently, in index.html. */
 body {
-  @apply text-slate-900 dark:text-slate-100;
-  font-family: "Segoe UI", "Inter", system-ui, -apple-system, sans-serif;
+  @apply bg-black font-sans text-zinc-100;
 }
 
 ::-webkit-scrollbar {
@@ -23,7 +26,50 @@ body {
   @apply bg-transparent;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-slate-400/50 dark:bg-slate-700 rounded-full;
+  @apply bg-zinc-700;
+}
+
+/* Section 1.5 - structural/label text is uppercase; free-text content
+   (inputs, textareas, log/note bodies) is explicitly exempted so operator
+   and reporter-entered text is never mangled. */
+button,
+label,
+th,
+nav a,
+h1,
+h2,
+h3,
+.status-pill,
+select {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+input,
+textarea,
+p,
+.no-uppercase {
+  text-transform: none;
+}
+
+/* Section 1.8 - native <select> elements otherwise inherit light-mode
+   system colors regardless of the app's theme, rendering white-on-white
+   (legible only on hover/focus in some browsers). Every dropdown and its
+   option list gets explicit, theme-consistent foreground/background colors
+   in every state, globally, rather than relying on browser defaults. */
+select {
+  background-color: #000000;
+  color: #f4f4f5;
+  border-color: #3f3f46;
+}
+select:hover,
+select:focus {
+  background-color: #09090b;
+  color: #ffffff;
+  border-color: #71717a;
+}
+select option {
+  background-color: #000000;
+  color: #f4f4f5;
 }
 
 /*
@@ -36,36 +82,39 @@ body {
  */
 @layer components {
   .status-pill {
-    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-wide;
+    @apply inline-flex items-center gap-1.5 border px-2.5 py-1 text-xs font-semibold;
   }
   .status-go {
-    @apply bg-aat-go/15 text-aat-go border border-aat-go/40;
+    @apply bg-aat-go/15 text-aat-go border-aat-go/40;
   }
   .status-caution {
-    @apply bg-aat-caution/15 text-aat-caution border border-aat-caution/40;
+    @apply bg-aat-caution/15 text-aat-caution border-aat-caution/40;
   }
   .status-nogo {
-    @apply bg-aat-nogo/15 text-aat-nogo border border-aat-nogo/40;
+    @apply bg-aat-nogo/15 text-aat-nogo border-aat-nogo/40;
   }
   .status-neutral {
-    @apply bg-slate-400/15 text-slate-500 dark:text-slate-400 border border-slate-400/30;
+    @apply bg-zinc-500/15 text-zinc-400 border-zinc-500/30;
   }
 
   .card {
-    @apply rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900;
+    @apply border border-zinc-800 bg-zinc-950;
   }
 
   .input {
-    @apply w-full rounded-md border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-aat-accent dark:border-slate-700;
+    @apply w-full border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-400;
   }
 
+  /* Section 1.1 - only destructive/critical actions (.btn-danger) carry
+     color. Primary and secondary actions are pure monotone, distinguished
+     by contrast, not hue. */
   .btn-primary {
-    @apply rounded-md bg-aat-accent px-4 py-2 text-sm font-semibold text-white hover:bg-aat-accent/90;
+    @apply border border-white bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200;
   }
   .btn-secondary {
-    @apply rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800;
+    @apply border border-zinc-600 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-zinc-800;
   }
   .btn-danger {
-    @apply rounded-md bg-aat-nogo px-4 py-2 text-sm font-semibold text-white hover:bg-aat-nogo/90;
+    @apply border border-aat-nogo bg-aat-nogo px-4 py-2 text-sm font-semibold text-white hover:bg-aat-nogo/90;
   }
 }

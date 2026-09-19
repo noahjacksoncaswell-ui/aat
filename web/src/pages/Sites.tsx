@@ -64,7 +64,7 @@ export default function Sites() {
               key={key}
               onClick={() => setLayer(key as keyof typeof TILE_LAYERS)}
               className={`rounded-md px-3 py-1.5 text-xs font-medium ${
-                layer === key ? "bg-aat-accent text-white" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                layer === key ? "bg-white text-black" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
               }`}
             >
               {cfg.label}
@@ -74,7 +74,7 @@ export default function Sites() {
         <RequireRole roles={["ADMIN"]}>
           <button
             onClick={() => setShowNewSite(true)}
-            className="absolute right-4 top-4 z-[1000] rounded-lg bg-aat-accent px-3 py-1.5 text-xs font-semibold text-white shadow-md hover:bg-aat-accent/90"
+            className="absolute right-4 top-4 z-[1000] rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-black shadow-md hover:bg-zinc-200"
           >
             + New Site
           </button>
@@ -131,17 +131,17 @@ function SiteDetailPanel({ siteId, onClose }: { siteId: string; onClose: () => v
     return "EXPIRED";
   }, [coas]);
 
-  if (!site) return <div className="w-[420px] border-l border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">Loading...</div>;
+  if (!site) return <div className="w-[420px] border-l border-zinc-800 bg-black p-6">Loading...</div>;
 
   return (
-    <div className="flex w-[420px] shrink-0 flex-col overflow-y-auto border-l border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+    <div className="flex w-[420px] shrink-0 flex-col overflow-y-auto border-l border-zinc-800 bg-black">
       <div className="flex items-start justify-between border-b border-slate-200 p-5 dark:border-slate-800">
         <div>
           <div className="text-lg font-bold">{site.name}</div>
           <div className="font-mono text-xs text-slate-500 dark:text-slate-400">{site.designator}</div>
         </div>
         <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
-          ✕
+          CLOSE
         </button>
       </div>
 
@@ -235,7 +235,7 @@ function SiteDetailPanel({ siteId, onClose }: { siteId: string; onClose: () => v
               />
               <button
                 onClick={() => photoUrl && addPhoto.mutate()}
-                className="rounded-md bg-aat-accent px-2 py-1 text-xs font-semibold text-white"
+                className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-black"
               >
                 Add
               </button>
@@ -312,7 +312,7 @@ function EditSiteForm({ site, onDone }: { site: Site; onDone: () => void }) {
           className="w-full rounded-md border border-slate-300 bg-transparent px-2 py-1 text-xs dark:border-slate-700"
         />
       ))}
-      <button onClick={() => mutation.mutate()} className="w-full rounded-md bg-aat-accent py-1.5 text-xs font-semibold text-white">
+      <button onClick={() => mutation.mutate()} className="w-full rounded-md bg-white py-1.5 text-xs font-semibold text-black">
         Save
       </button>
     </div>
@@ -349,7 +349,7 @@ function NewSiteModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
         <h2 className="mb-4 text-lg font-bold">New Launch Site</h2>
         <div className="space-y-3">
           <input placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input" />
@@ -384,7 +384,7 @@ function NewSiteModal({ onClose }: { onClose: () => void }) {
           <button
             onClick={() => mutation.mutate()}
             disabled={!form.name || !form.designator || !form.lat || !form.lon}
-            className="rounded-md bg-aat-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="rounded-md bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
           >
             Create Site
           </button>

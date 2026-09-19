@@ -175,7 +175,7 @@ function ActionButtons({ mission, missionId, onRequestScrub }: { mission: any; m
 
       {modal === "postpone" && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
             <h2 className="mb-1 text-lg font-bold">Postpone Indefinitely</h2>
             <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
               This voids ALL currently defined Launch Period entries for this mission, not just the targeted one. New windows may be
@@ -196,7 +196,7 @@ function ActionButtons({ mission, missionId, onRequestScrub }: { mission: any; m
 
       {modal === "cancel1" && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
             <h2 className="mb-1 text-lg font-bold text-aat-nogo">Cancel Mission</h2>
             <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
               This cancels the mission in its entirety, not just the current launch opportunity. This action is{" "}
@@ -217,7 +217,7 @@ function ActionButtons({ mission, missionId, onRequestScrub }: { mission: any; m
 
       {modal === "cancel2" && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
             <h2 className="mb-1 text-lg font-bold text-aat-nogo">Confirm Cancellation — Irreversible</h2>
             <p className="mb-3 text-sm">
               Type the mission designator <strong className="font-mono">{mission.designator}</strong> to confirm. This cannot be undone.
@@ -276,7 +276,7 @@ function ScrubModal({ missionId, onClose }: { missionId: string; onClose: () => 
   if (result) {
     return (
       <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-        <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+        <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
           <h2 className="mb-2 text-lg font-bold">Mission Scrubbed</h2>
           <p className="mb-4 text-sm">
             {result.remainingOpportunities > 0
@@ -295,7 +295,7 @@ function ScrubModal({ missionId, onClose }: { missionId: string; onClose: () => 
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
         <h2 className="mb-1 text-lg font-bold text-aat-nogo">Scrub</h2>
         <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
           Only available with a confirmed Target Launch Opportunity, on the day of that opportunity.
@@ -344,7 +344,7 @@ function TargetModal({ missionId, entries, onClose, onDone }: { missionId: strin
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
         <h2 className="mb-3 text-lg font-bold">Select Target Launch Opportunity</h2>
         {!confirming ? (
           <>
@@ -445,7 +445,7 @@ function DispositionModal({ missionId, onClose, onDone }: { missionId: string; o
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 dark:bg-slate-900">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-800 bg-black p-6">
         <h2 className="mb-4 text-lg font-bold">Flight Disposition</h2>
         <div className="space-y-3">
           <select value={form.outcome} onChange={(e) => setForm({ ...form, outcome: e.target.value })} className="input">
@@ -571,7 +571,7 @@ function OverviewTab({ mission, missionId, useZulu, onRequestScrub }: any) {
               <button
                 onClick={() => addEntry.mutate()}
                 disabled={!newEntry.date || !newEntry.windowOpen || !newEntry.windowClose}
-                className="rounded-md bg-aat-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-black disabled:opacity-50"
               >
                 Add window
               </button>
@@ -831,7 +831,7 @@ function FaaTab({ missionId, targeted, useZulu }: { missionId: string; targeted:
                 className="input"
               />
             </div>
-            <button onClick={() => fileNotamMutation.mutate()} className="rounded-md bg-aat-accent px-3 py-2 text-xs font-semibold text-white">
+            <button onClick={() => fileNotamMutation.mutate()} className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-black">
               Log NOTAM Filing
             </button>
           </div>
@@ -926,7 +926,7 @@ function LogTab({ mission, missionId, useZulu }: any) {
         />
         <button
           onClick={() => text.trim() && mutation.mutate()}
-          className="shrink-0 rounded-md bg-aat-accent px-4 py-2 text-sm font-semibold text-white"
+          className="shrink-0 rounded-md bg-white px-4 py-2 text-sm font-semibold text-black"
         >
           Log
         </button>

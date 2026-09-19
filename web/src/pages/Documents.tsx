@@ -59,7 +59,6 @@ export default function Documents() {
         <header className="flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Launch Documentation Library</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Mission paperwork, active and archived, searchable by site and mission.</p>
           </div>
           <RequireRole roles={["ADMIN", "LAUNCH_DIRECTOR", "OPERATOR"]}>
             <button onClick={() => setShowUpload(true)} className="btn-primary">
@@ -195,19 +194,19 @@ function DocumentPanel({ id, onClose }: { id: string; onClose: () => void }) {
     },
   });
 
-  if (!doc) return <div className="w-[420px] border-l border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">Loading...</div>;
+  if (!doc) return <div className="w-[420px] border-l border-zinc-800 bg-black p-6">Loading...</div>;
 
   const latestVersion = doc.versions?.[0];
 
   return (
-    <div className="flex w-[420px] shrink-0 flex-col overflow-y-auto border-l border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+    <div className="flex w-[420px] shrink-0 flex-col overflow-y-auto border-l border-zinc-800 bg-black">
       <div className="flex items-start justify-between border-b border-slate-200 p-5 dark:border-slate-800">
         <div>
           <div className="text-lg font-bold">{doc.title}</div>
           <div className="text-xs text-slate-500 dark:text-slate-400">{doc.category}</div>
         </div>
         <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
-          ✕
+          CLOSE
         </button>
       </div>
 
@@ -264,7 +263,7 @@ function DocumentPanel({ id, onClose }: { id: string; onClose: () => void }) {
               <button
                 onClick={() => newVersionFile && uploadVersion.mutate()}
                 disabled={!newVersionFile}
-                className="rounded-md bg-aat-accent px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-black disabled:opacity-50"
               >
                 Upload new version
               </button>
@@ -323,7 +322,7 @@ function UploadModal({ onClose, sites, missions }: { onClose: () => void; sites?
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 dark:bg-slate-900">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-800 bg-black p-6">
         <h2 className="mb-4 text-lg font-bold">Upload Document</h2>
         <div className="space-y-3">
           <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="input" />

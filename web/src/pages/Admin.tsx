@@ -24,7 +24,6 @@ export default function Admin() {
     <div className="space-y-6 p-8">
       <header>
         <h1 className="text-2xl font-bold tracking-tight">Admin Panel</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">User management, vehicle profiles, and the system-wide activity log.</p>
       </header>
 
       <div className="flex gap-1 border-b border-slate-200 dark:border-slate-800">
@@ -133,7 +132,7 @@ function UsersTab() {
 
       {showNew && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
             <h2 className="mb-4 text-lg font-bold">New User</h2>
             <div className="space-y-3">
               <input placeholder="Full name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input" />
@@ -258,7 +257,7 @@ function VehiclesTab() {
 
       {showNewVehicle && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
             <h2 className="mb-4 text-lg font-bold">New Vehicle</h2>
             <div className="space-y-3">
               <input placeholder="Name" value={vehicleForm.name} onChange={(e) => setVehicleForm({ ...vehicleForm, name: e.target.value })} className="input" />
@@ -358,7 +357,7 @@ function NewTemplateInline({ vehicleId }: { vehicleId: string }) {
         <button onClick={() => setOpen(false)} className="text-xs">
           Cancel
         </button>
-        <button onClick={() => mutation.mutate()} disabled={!name} className="rounded-md bg-aat-accent px-2 py-1 text-xs font-semibold text-white disabled:opacity-50">
+        <button onClick={() => mutation.mutate()} disabled={!name} className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-black disabled:opacity-50">
           Save template
         </button>
       </div>

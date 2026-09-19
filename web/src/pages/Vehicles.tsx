@@ -92,7 +92,7 @@ function NewVehicleModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
         <h2 className="mb-4 text-lg font-bold">New Vehicle</h2>
         <div className="space-y-3">
           <input placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input" />
@@ -330,7 +330,7 @@ function VehicleDetail({ vehicleId, onClose }: { vehicleId: string; onClose: () 
                   <button
                     onClick={() => docFile && uploadDoc.mutate()}
                     disabled={!docFile}
-                    className="w-full rounded-md bg-aat-accent py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                    className="w-full rounded-md bg-white py-1.5 text-xs font-semibold text-black disabled:opacity-50"
                   >
                     Upload schematic / drawing / photo / cert
                   </button>

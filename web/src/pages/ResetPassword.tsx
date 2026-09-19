@@ -40,7 +40,7 @@ export default function ResetPassword() {
               className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-aat-accent"
             />
             {error && <div className="rounded-md bg-aat-nogo/15 px-3 py-2 text-xs text-red-300">{error}</div>}
-            <button type="submit" className="w-full rounded-md bg-aat-accent py-2.5 text-sm font-semibold hover:bg-aat-accent/90">
+            <button type="submit" className="w-full rounded-md bg-white py-2.5 text-sm font-semibold hover:bg-zinc-200">
               Reset password
             </button>
             <Link to="/login" className="block text-center text-xs text-slate-400 hover:text-aat-accent">

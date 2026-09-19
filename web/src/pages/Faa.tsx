@@ -19,9 +19,6 @@ export default function Faa() {
       <header className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">FAA Coordination &amp; Airspace Authorization</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            COA status, weekly advance notice filings, and launch-day notification checklists.
-          </p>
         </div>
         <RequireRole roles={["ADMIN"]}>
           <button onClick={() => setShowNewCoa(true)} className="btn-primary">
@@ -182,7 +179,7 @@ function NewCoaModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 dark:bg-slate-900">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-800 bg-black p-6">
         <h2 className="mb-4 text-lg font-bold">New COA</h2>
         <div className="space-y-3">
           <select value={form.siteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })} className="input">

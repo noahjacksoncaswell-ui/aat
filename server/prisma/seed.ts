@@ -1,5 +1,7 @@
 import { PrismaClient, Role, SiteStatus, SiteType, MissionStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { STANDARD_GO_NO_GO_STATIONS } from "../src/services/missionWorkflow";
+import { COUNTDOWN_MILESTONE_SEQUENCE } from "../src/services/countdownSequence";
 
 const prisma = new PrismaClient();
 
@@ -67,6 +69,10 @@ async function main() {
       nearestWaterBodies: "Lake Allatoona (6 mi)",
       terrainType: "Rolling piedmont, mixed forest/cleared range",
       countryCode: "US",
+      traconFacilityName: "Atlanta TRACON (A80)",
+      traconPhone: "(770) 210-1000",
+      artccFacilityName: "Atlanta ARTCC (ZTL)",
+      artccPhone: "(770) 210-2000",
     },
   });
 
@@ -92,6 +98,36 @@ async function main() {
       id: "seed-vehicle-tenacity",
       name: "Tenacity",
       type: "Sounding Rocket",
+      designator: "TNC-01",
+      vehicleClass: "Class 2 High Power",
+      program: "Tenacity Flight Test Program",
+      status: "ACTIVE",
+      totalLengthIn: 126,
+      diameterIn: 6.17,
+      finSpanIn: 22,
+      wetMassKg: 68.5,
+      dryMassKg: 52.1,
+      massFraction: 0.24,
+      motorType: "L1520",
+      motorManufacturer: "Cesaroni",
+      propellantType: "APCP",
+      totalImpulseNs: 9850,
+      burnTimeSeconds: 3.4,
+      avgThrustN: 1520,
+      maxThrustN: 1890,
+      specificImpulseS: 235,
+      stageConfiguration: "Single stage",
+      drogueChuteSpec: '24" drogue, deployed at apogee',
+      mainChuteSpec: '96" main, deployed at 700 ft AGL',
+      deploymentMethod: "Dual-deploy, redundant altimeters",
+      ejectionChargeConfig: "Redundant black powder charges, primary + backup altimeter",
+      flightComputer: "MissileWorks RRC3+ (dual redundant)",
+      telemetrySystem: "L-band downlink, 10 Hz",
+      gpsTracking: "u-blox M8, GPS/GLONASS",
+      avionicsRedundancy: "Dual independent altimeter/GPS chains",
+      predictedApogeeM: 9100,
+      predictedMaxVelocityMach: 1.4,
+      predictedMaxQPsf: 620,
       windMaxKts: 20,
       ceilingMinFt: 3000,
       lightningRadiusMi: 10,
@@ -153,19 +189,12 @@ async function main() {
         ],
       },
       goNoGoPolls: {
-        create: ["Flight Dynamics", "Range Safety", "Weather", "Vehicle", "Recovery", "FAA/Airspace"].map((stationName) => ({
+        create: STANDARD_GO_NO_GO_STATIONS.map((stationName) => ({
           stationName,
         })),
       },
       milestones: {
-        create: [
-          { label: "Vehicle Rollout", tMinusSeconds: 24 * 3600, sortOrder: 0 },
-          { label: "Range Safety Briefing", tMinusSeconds: 6 * 3600, sortOrder: 1 },
-          { label: "Propellant Load Begins", tMinusSeconds: 4 * 3600, sortOrder: 2 },
-          { label: "Final Poll", tMinusSeconds: 15 * 60, sortOrder: 3 },
-          { label: "Terminal Count", tMinusSeconds: 60, sortOrder: 4 },
-          { label: "Ignition", tMinusSeconds: 10, sortOrder: 5 },
-        ],
+        create: COUNTDOWN_MILESTONE_SEQUENCE,
       },
       launchDayNotifications: {
         create: [{ notificationType: "T_MINUS_60" }, { notificationType: "T_MINUS_15" }, { notificationType: "TERMINATION" }],

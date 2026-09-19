@@ -29,7 +29,6 @@ export default function Dashboard() {
     <div className="space-y-6 p-8">
       <header>
         <h1 className="text-2xl font-bold tracking-tight">Operations Dashboard</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">At-a-glance status across all AAT launch operations.</p>
       </header>
 
       {data?.openActionItems?.length > 0 && (
@@ -80,7 +79,7 @@ export default function Dashboard() {
               )}
               <Link
                 to={`/missions/${next.missionId}`}
-                className="mt-4 inline-block rounded-md bg-aat-accent px-4 py-2 text-sm font-semibold text-white hover:bg-aat-accent/90"
+                className="mt-4 inline-block rounded-md bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200"
               >
                 Open Mission Console
               </Link>
