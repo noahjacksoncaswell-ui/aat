@@ -13,11 +13,17 @@ const router = Router();
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  // Revision Directive v3.0 Section 2.2 - the confidentiality/ITAR
+  // acknowledgment gate is required on every session, not accepted once and
+  // remembered, so the flag is carried on the login request itself.
+  acknowledged: z.literal(true),
 });
 
 router.post("/login", async (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Invalid credentials payload" });
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid credentials payload, or the confidentiality acknowledgment was not affirmed" });
+  }
   const { email, password } = parsed.data;
 
   const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
@@ -38,6 +44,7 @@ router.post("/login", async (req, res) => {
   });
 
   await recordAudit({ userId: user.id, action: "LOGIN", targetType: "User", targetId: user.id });
+  await recordAudit({ userId: user.id, action: "CONFIDENTIALITY_ACKNOWLEDGED", targetType: "User", targetId: user.id });
 
   res.json({
     accessToken,

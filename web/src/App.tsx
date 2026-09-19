@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import Sites from "./pages/Sites";
 import Missions from "./pages/Missions";
 import MissionDetail from "./pages/MissionDetail";
+import Vehicles from "./pages/Vehicles";
 import Faa from "./pages/Faa";
 import Documents from "./pages/Documents";
 import Admin from "./pages/Admin";
@@ -42,6 +43,8 @@ export default function App() {
         <Route path="/sites/:siteId" element={<Sites />} />
         <Route path="/missions" element={<Missions />} />
         <Route path="/missions/:missionId" element={<MissionDetail />} />
+        <Route path="/vehicles" element={<Vehicles />} />
+        <Route path="/vehicles/:vehicleId" element={<Vehicles />} />
         <Route path="/faa" element={<Faa />} />
         <Route path="/documents" element={<Documents />} />
         <Route path="/admin" element={<Admin />} />

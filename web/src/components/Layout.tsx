@@ -7,6 +7,7 @@ const navItems = [
   { to: "/", label: "Dashboard", icon: "◧", end: true },
   { to: "/sites", label: "Launch Sites & Weather", icon: "🛰" },
   { to: "/missions", label: "Mission Schedule", icon: "🚀" },
+  { to: "/vehicles", label: "Vehicles", icon: "🛠" },
   { to: "/faa", label: "FAA Coordination", icon: "📡" },
   { to: "/documents", label: "Documentation Library", icon: "📄" },
 ];

@@ -59,6 +59,10 @@ const siteSchema = z.object({
   nearestWaterBodies: z.string().optional().nullable(),
   terrainType: z.string().optional().nullable(),
   countryCode: z.string().optional(),
+  traconFacilityName: z.string().optional().nullable(),
+  traconPhone: z.string().optional().nullable(),
+  artccFacilityName: z.string().optional().nullable(),
+  artccPhone: z.string().optional().nullable(),
 });
 
 router.post("/", requireAdmin, async (req, res) => {

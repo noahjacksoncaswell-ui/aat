@@ -15,10 +15,11 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100
 const canManage = requireRole(Role.ADMIN, Role.LAUNCH_DIRECTOR);
 
 router.get("/", async (req, res) => {
-  const { siteId, missionId, category, status, q } = req.query as Record<string, string | undefined>;
+  const { siteId, missionId, vehicleId, category, status, q } = req.query as Record<string, string | undefined>;
   const where: any = {};
   if (siteId) where.siteId = siteId;
   if (missionId) where.missionId = missionId;
+  if (vehicleId) where.vehicleId = vehicleId;
   if (category) where.category = category;
   if (status) where.status = status;
   if (q) {
@@ -34,6 +35,7 @@ router.get("/", async (req, res) => {
       uploadedBy: { select: { id: true, name: true } },
       site: { select: { id: true, name: true, designator: true } },
       mission: { select: { id: true, name: true, designator: true } },
+      vehicle: { select: { id: true, name: true, designator: true } },
       versions: { orderBy: { version: "desc" }, take: 1 },
     },
   });
@@ -49,6 +51,7 @@ router.get("/:id", async (req, res) => {
       auditLog: { orderBy: { timestamp: "desc" }, include: { user: { select: { id: true, name: true } } }, take: 50 },
       site: { select: { id: true, name: true, designator: true } },
       mission: { select: { id: true, name: true, designator: true } },
+      vehicle: { select: { id: true, name: true, designator: true } },
     },
   });
   if (!document) return res.status(404).json({ error: "Document not found" });
@@ -60,6 +63,7 @@ const uploadMetaSchema = z.object({
   category: z.string().min(1),
   siteId: z.string().optional(),
   missionId: z.string().optional(),
+  vehicleId: z.string().optional(),
   status: z.nativeEnum(DocumentStatus).optional(),
   tags: z.string().optional(), // comma-separated
 });
@@ -68,7 +72,7 @@ router.post("/", upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "file is required" });
   const parsed = uploadMetaSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const { title, category, siteId, missionId, status, tags } = parsed.data;
+  const { title, category, siteId, missionId, vehicleId, status, tags } = parsed.data;
 
   const documentId = uuidv4();
   const storageKey = `documents/${documentId}/v1/${req.file.originalname}`;
@@ -81,6 +85,7 @@ router.post("/", upload.single("file"), async (req, res) => {
       category,
       siteId: siteId || null,
       missionId: missionId || null,
+      vehicleId: vehicleId || null,
       status: status ?? DocumentStatus.DRAFT,
       tags: tags ? tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
       uploadedById: req.user!.id,
@@ -139,6 +144,7 @@ const metaUpdateSchema = z.object({
   category: z.string().min(1).optional(),
   siteId: z.string().optional().nullable(),
   missionId: z.string().optional().nullable(),
+  vehicleId: z.string().optional().nullable(),
   status: z.nativeEnum(DocumentStatus).optional(),
   tags: z.array(z.string()).optional(),
 });

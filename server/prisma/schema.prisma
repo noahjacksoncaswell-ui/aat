@@ -56,6 +56,12 @@ enum MissionHistoryEventType {
   CANCELLED
   SCRUBBED
   SUCCESSFUL
+  LOT_SUBMITTED
+  LOT_REVISED
+  HOLD_CALLED
+  HOLD_RELEASED
+  RECYCLED
+  LIFTOFF_MARKED
   NOTE
 }
 
@@ -71,6 +77,33 @@ enum GoNoGoStatus {
   GO
   NO_GO
   HOLD
+}
+
+// T-COUNT lifecycle (Revision Directive v3.0 Section 6.2.1)
+enum TCountStatus {
+  PENDING // LOT not yet established
+  COUNTING
+  HOLDING
+  STOPPED // manually paused outside a programmed hold
+  COMPLETE // T-0 reached, liftoff marked
+}
+
+enum HoldType {
+  PROGRAMMED
+  UNSCHEDULED
+}
+
+enum HoldStatus {
+  SCHEDULED
+  ACTIVE
+  DURATION_ELAPSED
+  RELEASED
+}
+
+enum VehicleStatus {
+  ACTIVE
+  IN_DEVELOPMENT
+  RETIRED
 }
 
 enum CoaStatus {
@@ -103,31 +136,37 @@ enum DocumentStatus {
 // ---------------------------------------------------------------------------
 
 model User {
-  id                String     @id @default(uuid())
-  name              String
-  email             String     @unique
-  passwordHash      String
-  role              Role       @default(VIEWER)
-  status            UserStatus @default(ACTIVE)
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
+  id           String     @id @default(uuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(VIEWER)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
-  assignedSites     UserSiteAssignment[]
-  assignedMissions  UserMissionAssignment[]
+  assignedSites    UserSiteAssignment[]
+  assignedMissions UserMissionAssignment[]
 
-  passwordResets    PasswordResetToken[]
-  refreshTokens     RefreshToken[]
+  passwordResets PasswordResetToken[]
+  refreshTokens  RefreshToken[]
 
-  uploadedDocuments Document[]        @relation("DocumentUploadedBy")
-  documentVersions  DocumentVersion[] @relation("DocumentVersionUploadedBy")
+  uploadedDocuments Document[]           @relation("DocumentUploadedBy")
+  documentVersions  DocumentVersion[]    @relation("DocumentVersionUploadedBy")
   documentAudits    DocumentAuditEntry[]
 
-  missionHistoryEvents MissionHistoryEvent[]
-  missionLogEntries    MissionLogEntry[]
-  goNoGoUpdates        GoNoGoPoll[]
+  missionHistoryEvents   MissionHistoryEvent[]
+  missionLogEntries      MissionLogEntry[]
+  goNoGoUpdates          GoNoGoPoll[]
   launchDayNotifications LaunchDayNotification[]
-  notamFilings         NOTAMFiling[]
-  auditLogEntries      AuditLogEntry[]
+  notamFilings           NOTAMFiling[]
+  auditLogEntries        AuditLogEntry[]
+
+  missionHolds       MissionHold[]
+  lwccReports        LwccReport[]
+  lwccOverrides      LwccOverride[]
+  lwccLogEntries     LwccLogEntry[]
+  dispositionAddenda MissionDispositionAddendum[]
 
   @@index([role])
 }
@@ -145,13 +184,13 @@ model RefreshToken {
 }
 
 model PasswordResetToken {
-  id        String   @id @default(uuid())
-  token     String   @unique
+  id        String    @id @default(uuid())
+  token     String    @unique
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   @@index([userId])
 }
@@ -159,8 +198,8 @@ model PasswordResetToken {
 model UserSiteAssignment {
   userId String
   siteId String
-  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  site   Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
   @@id([userId, siteId])
 }
@@ -180,38 +219,63 @@ model UserMissionAssignment {
 // ---------------------------------------------------------------------------
 
 model Site {
-  id                String     @id @default(uuid())
-  name              String
-  designator        String     @unique
-  lat               Float
-  lon               Float
-  elevationMeters    Float?
-  status            SiteStatus @default(STANDBY)
-  type              SiteType   @default(FIXED_PAD)
-  ownershipNotes    String?
-  jurisdictionNotes String?
+  id                       String     @id @default(uuid())
+  name                     String
+  designator               String     @unique
+  lat                      Float
+  lon                      Float
+  elevationMeters          Float?
+  status                   SiteStatus @default(STANDBY)
+  type                     SiteType   @default(FIXED_PAD)
+  ownershipNotes           String?
+  jurisdictionNotes        String?
   nearestPopulationCenters String?
   nearestWaterBodies       String?
   terrainType              String?
-  countryCode       String   @default("US")
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  countryCode              String     @default("US")
+  // FAA facility cross-reference (Revision Directive v3.0 Section 6.4) - populated
+  // once per site so mission FAA & NOTAM tabs don't require re-entry per mission.
+  traconFacilityName       String?
+  traconPhone              String?
+  artccFacilityName        String?
+  artccPhone               String?
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
 
-  photos     SitePhoto[]
-  missions   Mission[]
-  coas       COA[]
-  documents  Document[]
-  assignedUsers UserSiteAssignment[]
+  photos         SitePhoto[]
+  missions       Mission[]
+  coas           COA[]
+  documents      Document[]
+  assignedUsers  UserSiteAssignment[]
+  weatherSamples WeatherSample[]
 
   @@index([status])
 }
 
+// Rolling weather samples captured on LWCC/dashboard polling, used to derive
+// the LWCC table's T-15-min comparison and short-horizon violation-risk
+// columns (Revision Directive v3.0 Section 7.2/7.3). This is a lightweight
+// trend buffer, not a forecast model.
+model WeatherSample {
+  id                          String   @id @default(uuid())
+  siteId                      String
+  site                        Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  capturedAt                  DateTime @default(now())
+  windSpeedKts                Float?
+  windGustKts                 Float?
+  temperatureC                Float?
+  visibilityMi                Float?
+  precipitationProbabilityPct Float?
+
+  @@index([siteId, capturedAt])
+}
+
 model SitePhoto {
-  id        String   @id @default(uuid())
-  siteId    String
-  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  url       String
-  caption   String?
+  id         String   @id @default(uuid())
+  siteId     String
+  site       Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  url        String
+  caption    String?
   uploadedAt DateTime @default(now())
 }
 
@@ -220,19 +284,67 @@ model SitePhoto {
 // ---------------------------------------------------------------------------
 
 model Vehicle {
-  id             String   @id @default(uuid())
-  name           String
-  type           String?
-  windMaxKts     Float?
-  ceilingMinFt   Float?
-  lightningRadiusMi Float?
+  id                 String        @id @default(uuid())
+  // Identification
+  name               String
+  type               String?
+  designator         String? // tail number
+  vehicleClass       String? // class/type designation
+  program            String? // program/family, if part of a series
+  status             VehicleStatus @default(IN_DEVELOPMENT)
+  configurationNotes String? // free-text log of configuration changes over time
+
+  // Physical characteristics
+  totalLengthIn Float?
+  diameterIn    Float?
+  finSpanIn     Float?
+  wetMassKg     Float?
+  dryMassKg     Float?
+  massFraction  Float?
+
+  // Propulsion
+  motorType         String?
+  motorManufacturer String?
+  propellantType    String?
+  totalImpulseNs    Float? // rated
+  burnTimeSeconds   Float?
+  avgThrustN        Float?
+  maxThrustN        Float?
+  specificImpulseS  Float?
+
+  // Staging / configuration
+  stageConfiguration String?
+
+  // Recovery systems
+  drogueChuteSpec      String?
+  mainChuteSpec        String?
+  deploymentMethod     String?
+  ejectionChargeConfig String?
+
+  // Avionics
+  flightComputer     String?
+  telemetrySystem    String?
+  gpsTracking        String?
+  avionicsRedundancy String?
+
+  // Performance (design/simulated)
+  predictedApogeeM         Float?
+  predictedMaxVelocityMach Float?
+  predictedMaxQPsf         Float?
+
+  // Weather commit thresholds (carried over from v2.0 build)
+  windMaxKts           Float?
+  ceilingMinFt         Float?
+  lightningRadiusMi    Float?
   maxPrecipProbability Float?
-  notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  notes                String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   missions  Mission[]
   templates MilestoneTemplate[]
+  documents Document[]
 }
 
 model MilestoneTemplate {
@@ -246,12 +358,12 @@ model MilestoneTemplate {
 }
 
 model MilestoneTemplateItem {
-  id             String            @id @default(uuid())
-  templateId     String
-  template       MilestoneTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  label          String
-  tMinusSeconds  Int // seconds before T-0; positive = before liftoff
-  sortOrder      Int               @default(0)
+  id            String            @id @default(uuid())
+  templateId    String
+  template      MilestoneTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  label         String
+  tMinusSeconds Int // seconds before T-0; positive = before liftoff
+  sortOrder     Int               @default(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -259,31 +371,77 @@ model MilestoneTemplateItem {
 // ---------------------------------------------------------------------------
 
 model Mission {
-  id          String        @id @default(uuid())
-  name        String
-  designator  String        @unique
-  vehicleId   String
-  vehicle     Vehicle       @relation(fields: [vehicleId], references: [id])
-  siteId      String
-  site        Site          @relation(fields: [siteId], references: [id])
-  status      MissionStatus @default(PENDING_WINDOW)
+  id                 String        @id @default(uuid())
+  name               String
+  designator         String        @unique
+  vehicleId          String
+  vehicle            Vehicle       @relation(fields: [vehicleId], references: [id])
+  siteId             String
+  site               Site          @relation(fields: [siteId], references: [id])
+  status             MissionStatus @default(PENDING_WINDOW)
   payloadDescription String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
-  launchPeriodEntries LaunchPeriodEntry[]
-  historyEvents       MissionHistoryEvent[]
-  disposition         MissionDisposition?
-  milestones          MissionMilestone[]
-  goNoGoPolls         GoNoGoPoll[]
-  logEntries          MissionLogEntry[]
-  notamFilings        NOTAMFiling[]
+  // --- Targeted Lift-Off Time (LOT) / Section 6.2.2 ---
+  lot                           DateTime? // confirmed Targeted Lift-Off Time (Zulu)
+  lotSubmittedAt                DateTime?
+  lotVehicleReadinessNotes      String?
+  lotRangeAvailabilityNotes     String?
+  lotMeteorologicalOutlookNotes String?
+  lotScheduleConstraintsNotes   String?
+  lotSafetyRegulatoryNotes      String?
+
+  // --- T-COUNT / P-COUNT state / Section 6.2.1 ---
+  // T-COUNT (T-minus to `lot`) = (lot - now) + holdOffsetSeconds while COUNTING,
+  // or frozen at (lot - activeHold.actualStartedAt) + holdOffsetSeconds while HOLDING.
+  // holdOffsetSeconds accumulates the realized duration of every released hold,
+  // so the count "drifts" later exactly as a real procedure-driven clock does.
+  tCountStatus      TCountStatus @default(PENDING)
+  holdOffsetSeconds Int          @default(0)
+  liftoffActualTime DateTime? // set by ESTABLISH ACTUAL LAUNCH TIME (MARK LIFTOFF)
+
+  lwccLogClearedAt DateTime? // Section 7.5 - display-only clear; rows are never deleted
+
+  launchPeriodEntries    LaunchPeriodEntry[]
+  historyEvents          MissionHistoryEvent[]
+  disposition            MissionDisposition?
+  milestones             MissionMilestone[]
+  goNoGoPolls            GoNoGoPoll[]
+  logEntries             MissionLogEntry[]
+  notamFilings           NOTAMFiling[]
   launchDayNotifications LaunchDayNotification[]
-  documents           Document[]
-  assignedUsers       UserMissionAssignment[]
+  documents              Document[]
+  assignedUsers          UserMissionAssignment[]
+  holds                  MissionHold[]
+  lwccReports            LwccReport[]
+  lwccHolds              LwccHold[]
+  lwccOverrides          LwccOverride[]
+  lwccLogEntries         LwccLogEntry[]
 
   @@index([status])
   @@index([siteId])
+}
+
+// Section 6.2.3 - programmed and unscheduled (called) holds against T-COUNT.
+model MissionHold {
+  id                       String     @id @default(uuid())
+  missionId                String
+  mission                  Mission    @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  type                     HoldType
+  holdMarkSeconds          Int // T-minus seconds from LOT at which this hold engages/engaged
+  estimatedDurationSeconds Int?
+  status                   HoldStatus @default(SCHEDULED)
+  reason                   String?
+  actualStartedAt          DateTime?
+  actualEndedAt            DateTime?
+  actualDurationSeconds    Int?
+  enteredById              String?
+  enteredBy                User?      @relation(fields: [enteredById], references: [id])
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+
+  @@index([missionId])
 }
 
 model LaunchPeriodEntry {
@@ -303,48 +461,76 @@ model LaunchPeriodEntry {
 }
 
 model MissionHistoryEvent {
-  id                      String                   @id @default(uuid())
-  missionId               String
-  mission                 Mission                  @relation(fields: [missionId], references: [id], onDelete: Cascade)
-  eventType               MissionHistoryEventType
-  timestamp               DateTime                 @default(now())
-  actorId                 String?
-  actor                   User?                    @relation(fields: [actorId], references: [id])
-  notes                   String?
+  id                         String                  @id @default(uuid())
+  missionId                  String
+  mission                    Mission                 @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  eventType                  MissionHistoryEventType
+  timestamp                  DateTime                @default(now())
+  actorId                    String?
+  actor                      User?                   @relation(fields: [actorId], references: [id])
+  notes                      String?
   relatedLaunchPeriodEntryId String?
-  relatedLaunchPeriodEntry  LaunchPeriodEntry?     @relation(fields: [relatedLaunchPeriodEntryId], references: [id])
-  metadata                Json?
+  relatedLaunchPeriodEntry   LaunchPeriodEntry?      @relation(fields: [relatedLaunchPeriodEntryId], references: [id])
+  metadata                   Json?
 
   @@index([missionId])
 }
 
 model MissionDisposition {
-  id                       String   @id @default(uuid())
-  missionId                String   @unique
-  mission                  Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
-  outcome                  String // e.g. "Successful"
-  actualLiftoffTime        DateTime?
-  apogeeAltitudeMeters     Float?
-  flightDurationSeconds    Int?
-  vehiclePerformanceNotes  String?
-  payloadOutcome           String?
-  recoveryStatus           String?
-  anomaliesNotes           String?
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
+  id                      String    @id @default(uuid())
+  missionId               String    @unique
+  mission                 Mission   @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  outcome                 String // Successful / Partial Success / Failure / Anomaly
+  actualLiftoffTime       DateTime?
+  flightDurationSeconds   Int? // total flight time, burnout to touchdown/recovery
+  apogeeAltitudeMeters    Float? // legacy field, retained for backward compatibility
+  apogeeAltitudeAglMeters Float?
+  apogeeAltitudeMslMeters Float?
+  maxVelocityMs           Float?
+  maxAccelerationG        Float?
+  actualTotalImpulseNs    Float? // as flown, for post-flight motor performance comparison
+  recoveryStatus          String?
+  recoveryLocationLat     Float?
+  recoveryLocationLon     Float?
+  payloadOutcome          String?
+  anomalySummary          String?
+  anomalyReferenceNote    String? // reference to full anomaly investigation doc/case number
+  vehiclePerformanceNotes String?
+  missionNotes            String?
+  anomaliesNotes          String? // legacy field, retained for backward compatibility
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  addenda MissionDispositionAddendum[]
+}
+
+// Corrections to a logged disposition are appended, never overwrite the
+// original record (Revision Directive v3.0 Section 3.5).
+model MissionDispositionAddendum {
+  id            String             @id @default(uuid())
+  dispositionId String
+  disposition   MissionDisposition @relation(fields: [dispositionId], references: [id], onDelete: Cascade)
+  authorId      String
+  author        User               @relation(fields: [authorId], references: [id])
+  timestamp     DateTime           @default(now())
+  text          String
+
+  @@index([dispositionId])
 }
 
 model MissionMilestone {
-  id            String          @id @default(uuid())
-  missionId     String
-  mission       Mission         @relation(fields: [missionId], references: [id], onDelete: Cascade)
-  label         String
-  tMinusSeconds Int
-  status        MilestoneStatus @default(UPCOMING)
-  actualTime    DateTime?
-  sortOrder     Int             @default(0)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  id                 String          @id @default(uuid())
+  missionId          String
+  mission            Mission         @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  phase              String? // "PRE_OPERATION_SETUP" | "COUNTDOWN"
+  label              String
+  responsibleStation String?
+  tMinusSeconds      Int
+  status             MilestoneStatus @default(UPCOMING)
+  actualTime         DateTime?
+  sortOrder          Int             @default(0)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 
   @@index([missionId])
 }
@@ -381,35 +567,35 @@ model MissionLogEntry {
 // ---------------------------------------------------------------------------
 
 model COA {
-  id                  String    @id @default(uuid())
-  siteId              String
-  site                Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  coaNumber           String
-  issuingFacility     String
-  effectiveDate       DateTime
-  expirationDate      DateTime
-  authorizedActivity  String?
-  altitudeLimits      String?
-  conditions          String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  id                 String   @id @default(uuid())
+  siteId             String
+  site               Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  coaNumber          String
+  issuingFacility    String
+  effectiveDate      DateTime
+  expirationDate     DateTime
+  authorizedActivity String?
+  altitudeLimits     String?
+  conditions         String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@index([siteId])
 }
 
 model NOTAMFiling {
-  id                     String            @id @default(uuid())
-  missionId              String
-  mission                Mission           @relation(fields: [missionId], references: [id], onDelete: Cascade)
-  filedDate              DateTime?
+  id                       String    @id @default(uuid())
+  missionId                String
+  mission                  Mission   @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  filedDate                DateTime?
   leidosConfirmationNumber String?
-  notamWindowOpen        DateTime?
-  notamWindowClose       DateTime?
-  filedById              String?
-  filedBy                User?             @relation(fields: [filedById], references: [id])
-  notes                  String?
-  createdAt              DateTime          @default(now())
-  updatedAt              DateTime          @updatedAt
+  notamWindowOpen          DateTime?
+  notamWindowClose         DateTime?
+  filedById                String?
+  filedBy                  User?     @relation(fields: [filedById], references: [id])
+  notes                    String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   @@index([missionId])
 }
@@ -433,47 +619,117 @@ model LaunchDayNotification {
 }
 
 // ---------------------------------------------------------------------------
+// LWCC - Launch Weather Commit Criteria (Revision Directive v3.0 Section 7)
+//
+// The LWCCR 3-22 requirement definitions (description, limit text, live vs.
+// manual evaluation mode, hold duration) are fixed reference data extracted
+// from APC-STD-23-01 and are hardcoded in server/src/services/lwcc.ts rather
+// than stored in the database - they are not user-editable. The models below
+// hold only the per-mission, per-requirement LIVE STATE: manual reports,
+// active/expired time-based holds, overrides, and the activity log.
+// ---------------------------------------------------------------------------
+
+model LwccReport {
+  id            String   @id @default(uuid())
+  missionId     String
+  mission       Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  requirementNo Int
+  reportedById  String
+  reportedBy    User     @relation(fields: [reportedById], references: [id])
+  timestamp     DateTime @default(now())
+  data          Json // structured per-requirement report payload
+  notes         String?
+
+  @@index([missionId, requirementNo])
+}
+
+model LwccHold {
+  id              String   @id @default(uuid())
+  missionId       String
+  mission         Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  requirementNo   Int
+  triggeredAt     DateTime @default(now())
+  durationSeconds Int
+  expiresAt       DateTime
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  @@index([missionId, requirementNo, active])
+}
+
+model LwccOverride {
+  id             String   @id @default(uuid())
+  missionId      String
+  mission        Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  requirementNo  Int
+  justification  String
+  overriddenById String
+  overriddenBy   User     @relation(fields: [overriddenById], references: [id])
+  timestamp      DateTime @default(now())
+  active         Boolean  @default(true)
+
+  @@index([missionId, requirementNo, active])
+}
+
+model LwccLogEntry {
+  id            String   @id @default(uuid())
+  missionId     String
+  mission       Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  eventType     String // REPORT_SUBMITTED / VIOLATION_TRIGGERED / HOLD_STARTED / HOLD_EXPIRED / OVERRIDE / LOG_CLEARED
+  requirementNo Int?
+  actorId       String?
+  actor         User?    @relation(fields: [actorId], references: [id])
+  timestamp     DateTime @default(now())
+  details       Json?
+
+  @@index([missionId])
+}
+
+// ---------------------------------------------------------------------------
 // Documentation library
 // ---------------------------------------------------------------------------
 
 model Document {
-  id            String         @id @default(uuid())
-  title         String
-  category      String
-  siteId        String?
-  site          Site?          @relation(fields: [siteId], references: [id])
-  missionId     String?
-  mission       Mission?       @relation(fields: [missionId], references: [id])
-  status        DocumentStatus @default(DRAFT)
-  currentVersion Int           @default(1)
-  tags          String[]       @default([])
-  uploadedById  String
-  uploadedBy    User           @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
-  uploadedAt    DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id             String         @id @default(uuid())
+  title          String
+  category       String
+  siteId         String?
+  site           Site?          @relation(fields: [siteId], references: [id])
+  missionId      String?
+  mission        Mission?       @relation(fields: [missionId], references: [id])
+  vehicleId      String?
+  vehicle        Vehicle?       @relation(fields: [vehicleId], references: [id])
+  status         DocumentStatus @default(DRAFT)
+  currentVersion Int            @default(1)
+  tags           String[]       @default([])
+  uploadedById   String
+  uploadedBy     User           @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
+  uploadedAt     DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
-  versions   DocumentVersion[]
-  auditLog   DocumentAuditEntry[]
+  versions DocumentVersion[]
+  auditLog DocumentAuditEntry[]
 
   @@index([category])
   @@index([status])
   @@index([siteId])
   @@index([missionId])
+  @@index([vehicleId])
 }
 
 model DocumentVersion {
-  id           String   @id @default(uuid())
-  documentId   String
-  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  version      Int
-  storageKey   String // S3 key or local relative path
-  fileName     String
-  mimeType     String
+  id            String   @id @default(uuid())
+  documentId    String
+  document      Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  version       Int
+  storageKey    String // S3 key or local relative path
+  fileName      String
+  mimeType      String
   fileSizeBytes Int
-  uploadedById String
-  uploadedBy   User     @relation("DocumentVersionUploadedBy", fields: [uploadedById], references: [id])
-  uploadedAt   DateTime @default(now())
-  notes        String?
+  uploadedById  String
+  uploadedBy    User     @relation("DocumentVersionUploadedBy", fields: [uploadedById], references: [id])
+  uploadedAt    DateTime @default(now())
+  notes         String?
 
   @@unique([documentId, version])
 }

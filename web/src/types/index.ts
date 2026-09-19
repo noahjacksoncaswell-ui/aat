@@ -34,6 +34,10 @@ export interface Site {
   nearestWaterBodies?: string | null;
   terrainType?: string | null;
   countryCode: string;
+  traconFacilityName?: string | null;
+  traconPhone?: string | null;
+  artccFacilityName?: string | null;
+  artccPhone?: string | null;
   coaStatus?: CoaComputedStatus;
   photos?: SitePhoto[];
   coas?: Coa[];
@@ -59,16 +63,61 @@ export interface WeatherSnapshot {
   shortForecast?: string;
 }
 
+export type VehicleStatus = "ACTIVE" | "IN_DEVELOPMENT" | "RETIRED";
+
 export interface Vehicle {
   id: string;
   name: string;
   type?: string | null;
+  designator?: string | null;
+  vehicleClass?: string | null;
+  program?: string | null;
+  status: VehicleStatus;
+  configurationNotes?: string | null;
+
+  totalLengthIn?: number | null;
+  diameterIn?: number | null;
+  finSpanIn?: number | null;
+  wetMassKg?: number | null;
+  dryMassKg?: number | null;
+  massFraction?: number | null;
+
+  motorType?: string | null;
+  motorManufacturer?: string | null;
+  propellantType?: string | null;
+  totalImpulseNs?: number | null;
+  burnTimeSeconds?: number | null;
+  avgThrustN?: number | null;
+  maxThrustN?: number | null;
+  specificImpulseS?: number | null;
+
+  stageConfiguration?: string | null;
+
+  drogueChuteSpec?: string | null;
+  mainChuteSpec?: string | null;
+  deploymentMethod?: string | null;
+  ejectionChargeConfig?: string | null;
+
+  flightComputer?: string | null;
+  telemetrySystem?: string | null;
+  gpsTracking?: string | null;
+  avionicsRedundancy?: string | null;
+
+  predictedApogeeM?: number | null;
+  predictedMaxVelocityMach?: number | null;
+  predictedMaxQPsf?: number | null;
+
   windMaxKts?: number | null;
   ceilingMinFt?: number | null;
   lightningRadiusMi?: number | null;
   maxPrecipProbability?: number | null;
   notes?: string | null;
+
   templates?: MilestoneTemplate[];
+  documents?: DocumentRecord[];
+  missions?: Mission[];
+  totalMissionsFlown?: number;
+  lastFlightDate?: string | null;
 }
 
 export interface MilestoneTemplate {
@@ -101,7 +150,9 @@ export type MilestoneStatus = "UPCOMING" | "IN_PROGRESS" | "COMPLETE" | "HELD";
 
 export interface MissionMilestone {
   id: string;
+  phase?: "PRE_OPERATION_SETUP" | "COUNTDOWN" | null;
   label: string;
+  responsibleStation?: string | null;
   tMinusSeconds: number;
   status: MilestoneStatus;
   actualTime?: string | null;
@@ -127,7 +178,19 @@ export interface MissionLogEntry {
   author: { id: string; name: string };
 }
 
-export type MissionHistoryEventType = "TARGETED" | "POSTPONED" | "CANCELLED" | "SCRUBBED" | "SUCCESSFUL" | "NOTE";
+export type MissionHistoryEventType =
+  | "TARGETED"
+  | "POSTPONED"
+  | "CANCELLED"
+  | "SCRUBBED"
+  | "SUCCESSFUL"
+  | "LOT_SUBMITTED"
+  | "LOT_REVISED"
+  | "HOLD_CALLED"
+  | "HOLD_RELEASED"
+  | "RECYCLED"
+  | "LIFTOFF_MARKED"
+  | "NOTE";
 
 export interface MissionHistoryEvent {
   id: string;
@@ -138,16 +201,34 @@ export interface MissionHistoryEvent {
   metadata?: Record<string, unknown> | null;
 }
 
+export interface DispositionAddendum {
+  id: string;
+  timestamp: string;
+  text: string;
+  author: { id: string; name: string };
+}
+
 export interface MissionDisposition {
   outcome: string;
   actualLiftoffTime?: string | null;
-  apogeeAltitudeMeters?: number | null;
   flightDurationSeconds?: number | null;
-  vehiclePerformanceNotes?: string | null;
-  payloadOutcome?: string | null;
+  apogeeAltitudeAglMeters?: number | null;
+  apogeeAltitudeMslMeters?: number | null;
+  maxVelocityMs?: number | null;
+  maxAccelerationG?: number | null;
+  actualTotalImpulseNs?: number | null;
   recoveryStatus?: string | null;
-  anomaliesNotes?: string | null;
+  recoveryLocationLat?: number | null;
+  recoveryLocationLon?: number | null;
+  payloadOutcome?: string | null;
+  anomalySummary?: string | null;
+  anomalyReferenceNote?: string | null;
+  vehiclePerformanceNotes?: string | null;
+  missionNotes?: string | null;
+  addenda?: DispositionAddendum[];
 }
+
+export const DISPOSITION_OUTCOMES = ["Successful", "Partial Success", "Failure", "Anomaly"];
 
 export type NotificationType = "T_MINUS_60" | "T_MINUS_15" | "TERMINATION";
 
@@ -171,6 +252,37 @@ export interface NotamFiling {
   notes?: string | null;
 }
 
+// --- Countdown (Section 6.2) ---
+
+export type TCountStatus = "PENDING" | "COUNTING" | "HOLDING" | "STOPPED" | "COMPLETE";
+export type HoldType = "PROGRAMMED" | "UNSCHEDULED";
+export type HoldStatus = "SCHEDULED" | "ACTIVE" | "DURATION_ELAPSED" | "RELEASED";
+
+export interface MissionHold {
+  id: string;
+  type: HoldType;
+  holdMarkSeconds: number;
+  estimatedDurationSeconds?: number | null;
+  status: HoldStatus;
+  reason?: string | null;
+  actualStartedAt?: string | null;
+  actualEndedAt?: string | null;
+  actualDurationSeconds?: number | null;
+  enteredBy?: { id: string; name: string } | null;
+}
+
+export interface CountdownState {
+  lot?: string | null;
+  lotSubmittedAt?: string | null;
+  tCountStatus: TCountStatus;
+  holdOffsetSeconds: number;
+  liftoffActualTime?: string | null;
+  currentTMinusSeconds: number | null;
+  projectedLiftoff: string | null;
+  activeHold: MissionHold | null;
+  holds: MissionHold[];
+}
+
 export interface Mission {
   id: string;
   name: string;
@@ -190,6 +302,12 @@ export interface Mission {
   notamFilings?: NotamFiling[];
   launchDayNotifications?: LaunchDayNotification[];
   assignedUsers?: { user: { id: string; name: string; role: Role }; role?: string | null }[];
+  holds?: MissionHold[];
+  lot?: string | null;
+  lotSubmittedAt?: string | null;
+  tCountStatus?: TCountStatus;
+  holdOffsetSeconds?: number;
+  liftoffActualTime?: string | null;
   updatedAt?: string;
 }
 
@@ -205,6 +323,44 @@ export interface Coa {
   conditions?: string | null;
   status: CoaComputedStatus;
   site?: { id: string; name: string; designator: string };
+}
+
+// --- LWCC (Section 7) ---
+
+export type LwccRowStatus = "NO_VIOLATION" | "VIOLATION" | "HOLD_ACTIVE" | "OVERRIDDEN" | "NOT_REPORTED";
+export type LwccRiskLevel = "NONE" | "LOW" | "MODERATE" | "HIGH" | "ACTIVE" | "MANUAL" | "INSUFFICIENT_DATA";
+
+export interface LwccRow {
+  no: number;
+  description: string;
+  limitText: string;
+  mode: "LIVE" | "MANUAL";
+  status: LwccRowStatus;
+  currentValue: number | null;
+  valueAt15Min: number | null;
+  risk15: LwccRiskLevel;
+  risk30: LwccRiskLevel;
+  holdExpiresAt: string | null;
+  holdDurationSeconds: number | null;
+  lastReport: { id: string; timestamp: string; reportedBy: { id: string; name: string }; data: Record<string, unknown>; notes?: string | null } | null;
+  override: { justification: string; by: { id: string; name: string }; timestamp: string } | null;
+}
+
+export interface LwccLogEntry {
+  id: string;
+  eventType: string;
+  requirementNo?: number | null;
+  actor?: { id: string; name: string } | null;
+  timestamp: string;
+  details?: Record<string, unknown> | null;
+}
+
+export interface LwccState {
+  bannerStatus: "NO_VIOLATION" | "VIOLATION";
+  violatingRows: { no: number; description: string; currentValue: number | null; holdExpiresAt: string | null }[];
+  notReportedCount: number;
+  rows: LwccRow[];
+  log: LwccLogEntry[];
 }
 
 export type DocumentStatus = "DRAFT" | "IN_REVIEW" | "APPROVED" | "ARCHIVED";
@@ -240,6 +396,7 @@ export interface DocumentRecord {
   updatedAt: string;
   site?: { id: string; name: string; designator: string } | null;
   mission?: { id: string; name: string; designator: string } | null;
+  vehicle?: { id: string; name: string; designator?: string | null } | null;
   versions?: DocumentVersion[];
   auditLog?: DocumentAuditEntry[];
 }
@@ -256,5 +413,6 @@ export const DOCUMENT_CATEGORIES = [
   "Post-Flight/Anomaly Report",
   "Standard Operating Procedure (SOP)",
   "Checklist",
+  "Launch Countdown Procedure (LCP)",
   "Other",
 ];

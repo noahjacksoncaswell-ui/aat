@@ -60,13 +60,14 @@ router.get("/:id", async (req, res) => {
       site: true,
       launchPeriodEntries: { orderBy: { date: "asc" } },
       historyEvents: { orderBy: { timestamp: "desc" }, include: { actor: { select: { id: true, name: true } } } },
-      disposition: true,
+      disposition: { include: { addenda: { orderBy: { timestamp: "asc" }, include: { author: { select: { id: true, name: true } } } } } },
       milestones: { orderBy: { sortOrder: "asc" } },
       goNoGoPolls: true,
       logEntries: { orderBy: { timestamp: "desc" }, include: { author: { select: { id: true, name: true } } } },
       notamFilings: { orderBy: { createdAt: "desc" } },
       launchDayNotifications: true,
       assignedUsers: { include: { user: { select: { id: true, name: true, role: true } } } },
+      holds: { orderBy: { createdAt: "asc" }, include: { enteredBy: { select: { id: true, name: true } } } },
     },
   });
   if (!mission) return res.status(404).json({ error: "Mission not found" });
@@ -154,14 +155,29 @@ router.patch("/:id", requireLaunchDirector, async (req, res) => {
 router.post("/:id/launch-period", requireLaunchDirector, async (req, res) => {
   const parsed = launchPeriodEntrySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const entry = await prisma.launchPeriodEntry.create({
-    data: {
-      missionId: req.params.id,
-      date: new Date(parsed.data.date),
-      windowOpen: new Date(parsed.data.windowOpen),
-      windowClose: new Date(parsed.data.windowClose),
-    },
-  });
+
+  const mission = await prisma.mission.findUnique({ where: { id: req.params.id } });
+  if (!mission) return res.status(404).json({ error: "Mission not found" });
+  if (([MissionStatus.CANCELLED, MissionStatus.SUCCESSFUL] as MissionStatus[]).includes(mission.status)) {
+    return res.status(400).json({ error: `Cannot add a launch period entry to a mission that is already ${mission.status}` });
+  }
+
+  const [entry] = await prisma.$transaction([
+    prisma.launchPeriodEntry.create({
+      data: {
+        missionId: req.params.id,
+        date: new Date(parsed.data.date),
+        windowOpen: new Date(parsed.data.windowOpen),
+        windowClose: new Date(parsed.data.windowClose),
+      },
+    }),
+    // Section 3.2 - defining a new window after an indefinite postpone
+    // returns the mission to Pending Window.
+    ...(mission.status === MissionStatus.POSTPONED
+      ? [prisma.mission.update({ where: { id: mission.id }, data: { status: MissionStatus.PENDING_WINDOW } })]
+      : []),
+  ]);
+
   await recordAudit({ userId: req.user!.id, action: "LAUNCH_PERIOD_ENTRY_ADDED", targetType: "Mission", targetId: req.params.id });
   broadcastMissionUpdate(req.params.id);
   res.status(201).json(entry);
@@ -228,6 +244,11 @@ router.post("/:id/actions/target", requireLaunchDirector, async (req, res) => {
 
 const reasonSchema = z.object({ notes: z.string().min(1) });
 
+// Section 3.2 - Postpone Indefinitely. Voids ALL currently defined Launch
+// Period entries (not just the targeted one) - the mission returns to a
+// state with no defined launch windows at all, and the countdown reference
+// (LOT/T-COUNT/P-COUNT) resets. New Launch Period entries may be added
+// afterward, which is what returns the mission to Pending Window.
 router.post("/:id/actions/postpone", requireLaunchDirector, async (req, res) => {
   const parsed = reasonSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "A reason/notes field is required" });
@@ -242,39 +263,57 @@ router.post("/:id/actions/postpone", requireLaunchDirector, async (req, res) => 
     return res.status(400).json({ error: "Postpone is only available before the day of the targeted opportunity; use Scrub instead" });
   }
 
+  const voided = mission.launchPeriodEntries.filter((e) => !e.consumed);
+
   await prisma.$transaction(async (tx) => {
-    if (targeted) {
-      await tx.launchPeriodEntry.update({ where: { id: targeted.id }, data: { isTargeted: false } });
-    }
-    await tx.mission.update({ where: { id: mission.id }, data: { status: MissionStatus.PENDING_WINDOW } });
+    await tx.launchPeriodEntry.updateMany({
+      where: { missionId: mission.id, consumed: false },
+      data: { isTargeted: false, consumed: true },
+    });
+    await tx.mission.update({
+      where: { id: mission.id },
+      data: {
+        status: MissionStatus.POSTPONED,
+        lot: null,
+        lotSubmittedAt: null,
+        tCountStatus: "PENDING",
+        holdOffsetSeconds: 0,
+        liftoffActualTime: null,
+      },
+    });
     await tx.missionHistoryEvent.create({
       data: {
         missionId: mission.id,
         eventType: MissionHistoryEventType.POSTPONED,
         actorId: req.user!.id,
         notes: parsed.data.notes,
-        relatedLaunchPeriodEntryId: targeted?.id,
+        metadata: { voidedEntryIds: voided.map((e) => e.id), voidedCount: voided.length },
       },
     });
   });
 
-  await recordAudit({ userId: req.user!.id, action: "MISSION_POSTPONED", targetType: "Mission", targetId: mission.id, metadata: parsed.data });
+  await recordAudit({ userId: req.user!.id, action: "MISSION_POSTPONED_INDEFINITE", targetType: "Mission", targetId: mission.id, metadata: parsed.data });
   broadcastMissionUpdate(mission.id);
   res.status(204).send();
 });
 
-router.post("/:id/actions/cancel", requireLaunchDirector, async (req, res) => {
-  const parsed = reasonSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "A reason/notes field is required" });
+// Section 3.3 - Cancel. Terminal at any status prior to Successful. Requires
+// double confirmation: the frontend's second confirmation step, and here a
+// server-side match on the mission designator as a genuine (not cosmetic)
+// safety gate against an accidental or scripted call.
+const cancelSchema = z.object({ notes: z.string().min(1), confirmDesignator: z.string().min(1) });
 
-  const mission = await prisma.mission.findUnique({ where: { id: req.params.id }, include: { launchPeriodEntries: true } });
+router.post("/:id/actions/cancel", requireLaunchDirector, async (req, res) => {
+  const parsed = cancelSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A reason/notes field and confirmation designator are required" });
+
+  const mission = await prisma.mission.findUnique({ where: { id: req.params.id } });
   if (!mission) return res.status(404).json({ error: "Mission not found" });
-  if (([MissionStatus.SCRUBBED, MissionStatus.SUCCESSFUL, MissionStatus.CANCELLED] as MissionStatus[]).includes(mission.status)) {
+  if (([MissionStatus.CANCELLED, MissionStatus.SUCCESSFUL] as MissionStatus[]).includes(mission.status)) {
     return res.status(400).json({ error: `Cannot cancel a mission that is already ${mission.status}` });
   }
-  const targeted = mission.launchPeriodEntries.find((e) => e.isTargeted);
-  if (targeted && isTodayOrPast(targeted.date)) {
-    return res.status(400).json({ error: "Cancel is only available before the day of the targeted opportunity" });
+  if (parsed.data.confirmDesignator.trim().toUpperCase() !== mission.designator.toUpperCase()) {
+    return res.status(400).json({ error: "Confirmation designator does not match this mission - cancellation not executed" });
   }
 
   await prisma.$transaction(async (tx) => {
@@ -289,11 +328,18 @@ router.post("/:id/actions/cancel", requireLaunchDirector, async (req, res) => {
     });
   });
 
-  await recordAudit({ userId: req.user!.id, action: "MISSION_CANCELLED", targetType: "Mission", targetId: mission.id, metadata: parsed.data });
+  await recordAudit({ userId: req.user!.id, action: "MISSION_CANCELLED", targetType: "Mission", targetId: mission.id, metadata: { notes: parsed.data.notes } });
   broadcastMissionUpdate(mission.id);
   res.status(204).send();
 });
 
+// Section 3.4 - Scrub. Only on day-of with a confirmed target. Voids the
+// targeted opportunity and atomically resets the countdown reference in the
+// same transaction as the scrub itself, so there is no window in which a
+// stale T-COUNT/P-COUNT displays against an opportunity that no longer
+// exists. Does NOT auto-decide recycle vs. close-out - the mission returns
+// to Pending Window and the Launch Director explicitly chooses the
+// follow-on path (Select Target Launch Opportunity or Postpone Indefinitely).
 router.post("/:id/actions/scrub", requireLaunchDirector, async (req, res) => {
   const parsed = reasonSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "A reason/notes field is required" });
@@ -301,19 +347,28 @@ router.post("/:id/actions/scrub", requireLaunchDirector, async (req, res) => {
   const mission = await prisma.mission.findUnique({ where: { id: req.params.id }, include: { launchPeriodEntries: true } });
   if (!mission) return res.status(404).json({ error: "Mission not found" });
   if (mission.status !== MissionStatus.TARGETED) {
-    return res.status(400).json({ error: "Scrub is only available once a Target Launch Opportunity has been confirmed" });
+    return res.status(400).json({ error: "SCRUB UNAVAILABLE — NO TARGET LAUNCH OPPORTUNITY CONFIRMED" });
   }
   const targeted = mission.launchPeriodEntries.find((e) => e.isTargeted);
-  if (!targeted) return res.status(400).json({ error: "No targeted launch opportunity found" });
+  if (!targeted) return res.status(400).json({ error: "SCRUB UNAVAILABLE — NO TARGET LAUNCH OPPORTUNITY CONFIRMED" });
+  if (!isSameUtcDate(targeted.date, new Date())) {
+    return res.status(400).json({ error: "SCRUB UNAVAILABLE — NO TARGET LAUNCH OPPORTUNITY CONFIRMED FOR TODAY" });
+  }
 
   const remaining = mission.launchPeriodEntries.filter((e) => e.id !== targeted.id && !e.consumed);
-  const recycled = remaining.length > 0;
 
   await prisma.$transaction(async (tx) => {
     await tx.launchPeriodEntry.update({ where: { id: targeted.id }, data: { isTargeted: false, consumed: true } });
     await tx.mission.update({
       where: { id: mission.id },
-      data: { status: recycled ? MissionStatus.PENDING_WINDOW : MissionStatus.SCRUBBED },
+      data: {
+        status: MissionStatus.PENDING_WINDOW,
+        lot: null,
+        lotSubmittedAt: null,
+        tCountStatus: "PENDING",
+        holdOffsetSeconds: 0,
+        liftoffActualTime: null,
+      },
     });
     await tx.missionHistoryEvent.create({
       data: {
@@ -322,25 +377,33 @@ router.post("/:id/actions/scrub", requireLaunchDirector, async (req, res) => {
         actorId: req.user!.id,
         notes: parsed.data.notes,
         relatedLaunchPeriodEntryId: targeted.id,
-        metadata: { recycled },
+        metadata: { remainingOpportunities: remaining.length },
       },
     });
   });
 
-  await recordAudit({ userId: req.user!.id, action: "MISSION_SCRUBBED", targetType: "Mission", targetId: mission.id, metadata: { ...parsed.data, recycled } });
+  await recordAudit({ userId: req.user!.id, action: "MISSION_SCRUBBED", targetType: "Mission", targetId: mission.id, metadata: { ...parsed.data, remainingOpportunities: remaining.length } });
   broadcastMissionUpdate(mission.id);
-  res.status(200).json({ recycled });
+  res.status(200).json({ remainingOpportunities: remaining.length });
 });
 
 const dispositionSchema = z.object({
-  outcome: z.string().min(1).default("Successful"),
+  outcome: z.string().min(1), // Successful / Partial Success / Failure / Anomaly
   actualLiftoffTime: z.string().optional().nullable(),
-  apogeeAltitudeMeters: z.number().optional().nullable(),
   flightDurationSeconds: z.number().optional().nullable(),
-  vehiclePerformanceNotes: z.string().optional().nullable(),
-  payloadOutcome: z.string().optional().nullable(),
+  apogeeAltitudeAglMeters: z.number().optional().nullable(),
+  apogeeAltitudeMslMeters: z.number().optional().nullable(),
+  maxVelocityMs: z.number().optional().nullable(),
+  maxAccelerationG: z.number().optional().nullable(),
+  actualTotalImpulseNs: z.number().optional().nullable(),
   recoveryStatus: z.string().optional().nullable(),
-  anomaliesNotes: z.string().optional().nullable(),
+  recoveryLocationLat: z.number().optional().nullable(),
+  recoveryLocationLon: z.number().optional().nullable(),
+  payloadOutcome: z.string().optional().nullable(),
+  anomalySummary: z.string().optional().nullable(),
+  anomalyReferenceNote: z.string().optional().nullable(),
+  vehiclePerformanceNotes: z.string().optional().nullable(),
+  missionNotes: z.string().optional().nullable(),
 });
 
 router.post("/:id/actions/disposition", requireLaunchDirector, async (req, res) => {
@@ -354,12 +417,17 @@ router.post("/:id/actions/disposition", requireLaunchDirector, async (req, res) 
   }
 
   const { actualLiftoffTime, ...rest } = parsed.data;
+  // Section 3.5 - the actual liftoff time is established once, by MARK
+  // LIFTOFF on the Countdown tab, and is not re-entered here.
+  const liftoffTime = actualLiftoffTime ? new Date(actualLiftoffTime) : mission.liftoffActualTime;
+
+  const existing = await prisma.missionDisposition.findUnique({ where: { missionId: mission.id } });
 
   await prisma.$transaction(async (tx) => {
     await tx.missionDisposition.upsert({
       where: { missionId: mission.id },
-      update: { ...rest, actualLiftoffTime: actualLiftoffTime ? new Date(actualLiftoffTime) : null },
-      create: { missionId: mission.id, ...rest, actualLiftoffTime: actualLiftoffTime ? new Date(actualLiftoffTime) : null },
+      update: { ...rest, actualLiftoffTime: liftoffTime },
+      create: { missionId: mission.id, ...rest, actualLiftoffTime: liftoffTime },
     });
     await tx.mission.update({ where: { id: mission.id }, data: { status: MissionStatus.SUCCESSFUL } });
     const targeted = mission.launchPeriodEntries.find((e) => e.isTargeted);
@@ -369,7 +437,7 @@ router.post("/:id/actions/disposition", requireLaunchDirector, async (req, res) 
         missionId: mission.id,
         eventType: MissionHistoryEventType.SUCCESSFUL,
         actorId: req.user!.id,
-        notes: rest.vehiclePerformanceNotes ?? undefined,
+        notes: existing ? "Disposition record revised" : "Disposition logged",
         metadata: rest as any,
       },
     });
@@ -378,6 +446,25 @@ router.post("/:id/actions/disposition", requireLaunchDirector, async (req, res) 
   await recordAudit({ userId: req.user!.id, action: "MISSION_DISPOSITION_LOGGED", targetType: "Mission", targetId: mission.id });
   broadcastMissionUpdate(mission.id);
   res.status(204).send();
+});
+
+// Corrections to a logged disposition are appended, never overwrite the
+// original record (Section 3.5).
+router.post("/:id/disposition/addenda", requireLaunchDirector, async (req, res) => {
+  const schema = z.object({ text: z.string().min(1) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "text is required" });
+
+  const disposition = await prisma.missionDisposition.findUnique({ where: { missionId: req.params.id } });
+  if (!disposition) return res.status(404).json({ error: "No disposition on file for this mission" });
+
+  const addendum = await prisma.missionDispositionAddendum.create({
+    data: { dispositionId: disposition.id, authorId: req.user!.id, text: parsed.data.text },
+    include: { author: { select: { id: true, name: true } } },
+  });
+  await recordAudit({ userId: req.user!.id, action: "DISPOSITION_ADDENDUM_ADDED", targetType: "Mission", targetId: req.params.id });
+  broadcastMissionUpdate(req.params.id);
+  res.status(201).json(addendum);
 });
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,10 @@
 import { api } from "./client";
 import type {
   Coa,
+  CountdownState,
   DocumentRecord,
   DocumentStatus,
+  LwccState,
   Mission,
   MilestoneTemplate,
   Site,
@@ -27,7 +29,10 @@ export const addSitePhoto = (id: string, url: string, caption?: string) =>
 
 // Vehicles
 export const fetchVehicles = () => api.get<Vehicle[]>("/vehicles").then((r) => r.data);
+export const fetchVehicle = (id: string) => api.get<Vehicle>(`/vehicles/${id}`).then((r) => r.data);
 export const createVehicle = (data: Partial<Vehicle>) => api.post("/vehicles", data).then((r) => r.data);
+export const updateVehicle = (id: string, data: Partial<Vehicle>) => api.patch(`/vehicles/${id}`, data).then((r) => r.data);
+export const deleteVehicle = (id: string) => api.delete(`/vehicles/${id}`);
 export const createMilestoneTemplate = (vehicleId: string, data: Partial<MilestoneTemplate>) =>
   api.post(`/vehicles/${vehicleId}/templates`, data).then((r) => r.data);
 
@@ -51,12 +56,14 @@ export const targetLaunchOpportunity = (missionId: string, launchPeriodEntryId: 
   api.post(`/missions/${missionId}/actions/target`, { launchPeriodEntryId });
 export const postponeMission = (missionId: string, notes: string) =>
   api.post(`/missions/${missionId}/actions/postpone`, { notes });
-export const cancelMission = (missionId: string, notes: string) =>
-  api.post(`/missions/${missionId}/actions/cancel`, { notes });
+export const cancelMission = (missionId: string, notes: string, confirmDesignator: string) =>
+  api.post(`/missions/${missionId}/actions/cancel`, { notes, confirmDesignator });
 export const scrubMission = (missionId: string, notes: string) =>
   api.post(`/missions/${missionId}/actions/scrub`, { notes }).then((r) => r.data);
 export const logDisposition = (missionId: string, data: Record<string, unknown>) =>
   api.post(`/missions/${missionId}/actions/disposition`, data);
+export const addDispositionAddendum = (missionId: string, text: string) =>
+  api.post(`/missions/${missionId}/disposition/addenda`, { text }).then((r) => r.data);
 
 export const updateMilestone = (missionId: string, milestoneId: string, data: Record<string, unknown>) =>
   api.patch(`/missions/${missionId}/milestones/${milestoneId}`, data).then((r) => r.data);
@@ -71,6 +78,40 @@ export const addLogEntry = (missionId: string, text: string) =>
 
 export const setMissionPersonnel = (missionId: string, assignments: { userId: string; role?: string }[]) =>
   api.put(`/missions/${missionId}/personnel`, { assignments });
+
+// Countdown (Section 6.2)
+export const fetchCountdownState = (missionId: string) => api.get<CountdownState>(`/missions/${missionId}/countdown/state`).then((r) => r.data);
+export const submitLot = (missionId: string, data: Record<string, unknown>) =>
+  api.post(`/missions/${missionId}/countdown/lot`, data);
+export const reviseLot = (missionId: string, lot: string, reason: string) =>
+  api.patch(`/missions/${missionId}/countdown/lot`, { lot, reason });
+export const addProgrammedHold = (missionId: string, data: { holdMarkSeconds: number; estimatedDurationSeconds: number; reason?: string }) =>
+  api.post(`/missions/${missionId}/countdown/holds`, data).then((r) => r.data);
+export const removeHold = (missionId: string, holdId: string) => api.delete(`/missions/${missionId}/countdown/holds/${holdId}`);
+export const triggerHold = (missionId: string, holdId: string) =>
+  api.post(`/missions/${missionId}/countdown/holds/${holdId}/trigger`).then((r) => r.data);
+export const callHold = (missionId: string, reason: string) =>
+  api.post(`/missions/${missionId}/countdown/holds/call`, { reason }).then((r) => r.data);
+export const releaseHold = (missionId: string, holdId: string) =>
+  api.post(`/missions/${missionId}/countdown/holds/${holdId}/release`);
+export const pauseCountdown = (missionId: string, reason: string) =>
+  api.post(`/missions/${missionId}/countdown/pause`, { reason }).then((r) => r.data);
+export const recycleCountdown = (missionId: string, toMarkSeconds: number, reason: string) =>
+  api.post(`/missions/${missionId}/countdown/recycle`, { toMarkSeconds, reason });
+export const markLiftoff = (missionId: string, timestamp?: string) =>
+  api.post(`/missions/${missionId}/countdown/liftoff`, { timestamp });
+export const generateMilestoneSequence = (missionId: string) =>
+  api.post(`/missions/${missionId}/countdown/milestones/generate`).then((r) => r.data);
+
+// LWCC (Section 7)
+export const fetchLwccState = (missionId: string) => api.get<LwccState>(`/missions/${missionId}/lwcc`).then((r) => r.data);
+export const submitLwccReport = (missionId: string, data: { requirementNo: number; violation: boolean; data?: Record<string, unknown>; notes?: string }) =>
+  api.post(`/missions/${missionId}/lwcc/reports`, data).then((r) => r.data);
+export const overrideLwcc = (missionId: string, requirementNo: number, justification: string) =>
+  api.post(`/missions/${missionId}/lwcc/overrides`, { requirementNo, justification }).then((r) => r.data);
+export const clearLwccOverride = (missionId: string, requirementNo: number) =>
+  api.delete(`/missions/${missionId}/lwcc/overrides/${requirementNo}`);
+export const clearLwccLog = (missionId: string) => api.post(`/missions/${missionId}/lwcc/log/clear`);
 
 // NOTAM
 export const fetchNotamStatus = (missionId: string) => api.get(`/missions/${missionId}/notam`).then((r) => r.data);

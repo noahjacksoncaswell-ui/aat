@@ -40,7 +40,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [loadMe]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const res = await api.post("/auth/login", { email, password });
+    // Section 2.2 - the confidentiality/ITAR acknowledgment is required on
+    // every login; the Login page gates submission on the checkbox, and the
+    // flag is sent so the server can independently refuse an unacknowledged
+    // request rather than relying on the UI alone.
+    const res = await api.post("/auth/login", { email, password, acknowledged: true });
     setStoredTokens({ accessToken: res.data.accessToken, refreshToken: res.data.refreshToken });
     setUser(res.data.user);
   }, []);

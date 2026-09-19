@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { computeBestSiteCoaStatus, computeNotamStatus, REQUIRED_NOTIFICATION_TYPES } from "../services/faa";
 import { getWeatherForSite, evaluateWeatherAgainstLimits } from "../services/weather";
+import { quickLiveComplianceCheck } from "../services/lwcc";
 import { MissionStatus } from "@prisma/client";
 
 const router = Router();
@@ -29,6 +30,7 @@ router.get("/", async (_req, res) => {
 
   const next = targetedWithWindow[0];
   let nextOpportunity = null as any;
+  let lwccSnapshot = null as any;
   if (next) {
     const weather = await getWeatherForSite({
       siteId: next.mission.siteId,
@@ -48,6 +50,18 @@ router.get("/", async (_req, res) => {
       weatherStatus: evaluation.overallStatus,
       coaStatus: computeBestSiteCoaStatus(next.mission.site.coas),
       personnelOnConsole: next.mission.assignedUsers.map((a) => ({ id: a.user.id, name: a.user.name, role: a.role ?? a.user.role })),
+    };
+    const lwccCheck = quickLiveComplianceCheck({
+      windSpeedKts: weather.windSpeedKts,
+      windGustKts: weather.windGustKts,
+      temperatureC: weather.temperatureC,
+      visibilityMi: weather.visibilityMi,
+      precipitationProbabilityPct: weather.precipitationProbabilityPct,
+    });
+    lwccSnapshot = {
+      missionId: next.mission.id,
+      status: lwccCheck.status,
+      activeViolations: lwccCheck.violating.map((r) => ({ no: r.no, description: r.description })),
     };
   }
 
@@ -94,11 +108,53 @@ router.get("/", async (_req, res) => {
     include: { uploadedBy: { select: { id: true, name: true } } },
   });
 
+  // Fleet status summary (Section 5)
+  const vehicles = await prisma.vehicle.findMany({ select: { id: true, name: true, status: true } });
+  const fleetStatus = {
+    active: vehicles.filter((v) => v.status === "ACTIVE").length,
+    inDevelopment: vehicles.filter((v) => v.status === "IN_DEVELOPMENT").length,
+    retired: vehicles.filter((v) => v.status === "RETIRED").length,
+    nextMissionVehicle: next ? next.mission.vehicle.name : null,
+  };
+
+  // Mission pipeline - every non-terminal mission, not just the single "next" one
+  const pipeline = await prisma.mission.findMany({
+    where: { status: { in: [MissionStatus.PENDING_WINDOW, MissionStatus.TARGETED, MissionStatus.HOLD, MissionStatus.POSTPONED] } },
+    orderBy: { updatedAt: "desc" },
+    include: { vehicle: { select: { name: true } }, site: { select: { name: true, designator: true } } },
+  });
+
+  // Recent history feed across all missions (scrubs, cancellations, successes, etc.)
+  const recentHistory = await prisma.missionHistoryEvent.findMany({
+    orderBy: { timestamp: "desc" },
+    take: 15,
+    include: { actor: { select: { id: true, name: true } }, mission: { select: { id: true, name: true, designator: true } } },
+  });
+
   res.json({
     nextOpportunity,
+    lwccSnapshot,
+    fleetStatus,
     activeMissionCount: activeMissions.length,
     openActionItemCount: openActionItems.length,
     openActionItems,
+    missionPipeline: pipeline.map((m) => ({
+      id: m.id,
+      name: m.name,
+      designator: m.designator,
+      status: m.status,
+      vehicleName: m.vehicle.name,
+      siteName: m.site.name,
+      updatedAt: m.updatedAt,
+    })),
+    recentHistory: recentHistory.map((h) => ({
+      id: h.id,
+      eventType: h.eventType,
+      timestamp: h.timestamp,
+      notes: h.notes,
+      actor: h.actor,
+      mission: h.mission,
+    })),
     recentDocuments,
   });
 });

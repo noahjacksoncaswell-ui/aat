@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchDashboard } from "../api/resources";
 import { usePreferences } from "../context/PreferencesContext";
 import { formatCountdown, formatTimestamp } from "../utils/time";
-import { StatusPill, weatherStatusTone, coaStatusTone } from "../components/StatusPill";
+import { StatusPill, weatherStatusTone, coaStatusTone, missionStatusTone } from "../components/StatusPill";
 import { useDashboardSocket } from "../hooks/useSocket";
 
 export default function Dashboard() {
@@ -101,6 +101,121 @@ export default function Dashboard() {
         <QuickCard label="Active Missions" value={data?.activeMissionCount ?? 0} />
         <QuickCard label="Open Action Items" value={data?.openActionItemCount ?? 0} accent={data?.openActionItemCount > 0} />
         <QuickCard label="FAA Checklist Status" value={next ? "See mission" : "N/A"} small />
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="card p-5">
+          <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Fleet Status</div>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <div className="text-2xl font-bold text-aat-go">{data?.fleetStatus?.active ?? 0}</div>
+              <div className="text-[10px] uppercase text-slate-500 dark:text-slate-400">Active</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-aat-caution">{data?.fleetStatus?.inDevelopment ?? 0}</div>
+              <div className="text-[10px] uppercase text-slate-500 dark:text-slate-400">In Development</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-slate-400">{data?.fleetStatus?.retired ?? 0}</div>
+              <div className="text-[10px] uppercase text-slate-500 dark:text-slate-400">Retired</div>
+            </div>
+          </div>
+          {data?.fleetStatus?.nextMissionVehicle && (
+            <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+              Next mission vehicle: <span className="font-medium text-slate-700 dark:text-slate-200">{data.fleetStatus.nextMissionVehicle}</span>
+            </div>
+          )}
+          <Link to="/vehicles" className="mt-2 inline-block text-xs font-semibold text-aat-accent hover:underline">
+            View Vehicle Registry →
+          </Link>
+        </div>
+
+        <div className="card p-5">
+          <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">LWCC Status Snapshot</div>
+          {data?.lwccSnapshot ? (
+            <>
+              <StatusPill tone={data.lwccSnapshot.status === "VIOLATION" ? "nogo" : data.lwccSnapshot.status === "UNKNOWN" ? "neutral" : "go"}>
+                {data.lwccSnapshot.status.replace("_", " ")}
+              </StatusPill>
+              {data.lwccSnapshot.activeViolations?.length > 0 && (
+                <ul className="mt-2 space-y-0.5 text-xs">
+                  {data.lwccSnapshot.activeViolations.map((v: any) => (
+                    <li key={v.no}>
+                      LWCCR {v.no} — {v.description}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <Link to={`/missions/${data.lwccSnapshot.missionId}`} className="mt-2 inline-block text-xs font-semibold text-aat-accent hover:underline">
+                Full LWCC detail →
+              </Link>
+            </>
+          ) : (
+            <div className="text-sm text-slate-400">No mission currently targeted.</div>
+          )}
+        </div>
+      </section>
+
+      <section className="card overflow-hidden">
+        <div className="border-b border-slate-200 px-5 py-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
+          Mission Pipeline
+        </div>
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-800/40 dark:text-slate-400">
+            <tr>
+              <th className="px-4 py-2">Mission</th>
+              <th className="px-4 py-2">Vehicle</th>
+              <th className="px-4 py-2">Site</th>
+              <th className="px-4 py-2">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {data?.missionPipeline?.map((m: any) => (
+              <tr key={m.id}>
+                <td className="px-4 py-2">
+                  <Link to={`/missions/${m.id}`} className="font-medium text-aat-accent hover:underline">
+                    {m.name}
+                  </Link>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">{m.designator}</div>
+                </td>
+                <td className="px-4 py-2 text-xs">{m.vehicleName}</td>
+                <td className="px-4 py-2 text-xs">{m.siteName}</td>
+                <td className="px-4 py-2">
+                  <StatusPill tone={missionStatusTone(m.status)}>{m.status.replace("_", " ")}</StatusPill>
+                </td>
+              </tr>
+            ))}
+            {data?.missionPipeline?.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
+                  No missions in the pipeline.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="card p-6">
+        <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Recent Mission History</div>
+        <div className="space-y-2">
+          {data?.recentHistory?.length ? (
+            data.recentHistory.map((ev: any) => (
+              <div key={ev.id} className="flex items-center justify-between text-sm">
+                <div>
+                  <span className="font-medium">{ev.eventType.replace(/_/g, " ")}</span>{" "}
+                  <Link to={`/missions/${ev.mission.id}`} className="text-aat-accent hover:underline">
+                    {ev.mission.designator}
+                  </Link>
+                  {ev.actor && <span className="text-slate-500 dark:text-slate-400"> · {ev.actor.name}</span>}
+                </div>
+                <span className="text-xs text-slate-500 dark:text-slate-400">{formatTimestamp(ev.timestamp, useZulu)}</span>
+              </div>
+            ))
+          ) : (
+            <div className="text-sm text-slate-400">No mission history recorded yet.</div>
+          )}
+        </div>
       </section>
 
       <section className="card p-6">

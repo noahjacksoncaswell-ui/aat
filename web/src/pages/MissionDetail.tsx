@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  addDispositionAddendum,
   addLaunchPeriodEntry,
   addLogEntry,
   cancelMission,
@@ -17,22 +18,27 @@ import {
   targetLaunchOpportunity,
   updateGoNoGo,
   updateLaunchDayNotification,
-  updateMilestone,
+  uploadDocument,
 } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
 import { usePreferences } from "../context/PreferencesContext";
-import { formatCountdown, formatTimestamp } from "../utils/time";
-import { StatusPill, missionStatusTone, goNoGoTone, weatherStatusTone } from "../components/StatusPill";
+import { formatTimestamp } from "../utils/time";
+import { StatusPill, missionStatusTone, goNoGoTone } from "../components/StatusPill";
 import { useMissionSocket } from "../hooks/useSocket";
+import PersistentClockHeader from "../components/PersistentClockHeader";
+import CountdownTab from "../components/CountdownTab";
+import LwccTab from "../components/LwccTab";
 import type { NotificationType } from "../types";
+import { DISPOSITION_OUTCOMES } from "../types";
 
-const TABS = ["Overview", "Countdown & GO/NO-GO", "FAA & NOTAM", "Log", "History"] as const;
+const TABS = ["Overview", "Countdown", "Polls", "FAA & NOTAM", "Log", "History", "LWCC"] as const;
 
 export default function MissionDetail() {
   const { missionId } = useParams<{ missionId: string }>();
   const { useZulu } = usePreferences();
   const qc = useQueryClient();
   const [tab, setTab] = useState<(typeof TABS)[number]>("Overview");
+  const [scrubModalOpen, setScrubModalOpen] = useState(false);
 
   const { data: mission, isLoading } = useQuery({
     queryKey: ["mission", missionId],
@@ -42,6 +48,8 @@ export default function MissionDetail() {
 
   useMissionSocket(missionId, () => {
     qc.invalidateQueries({ queryKey: ["mission", missionId] });
+    qc.invalidateQueries({ queryKey: ["countdown", missionId] });
+    qc.invalidateQueries({ queryKey: ["lwcc", missionId] });
     qc.invalidateQueries({ queryKey: ["notam", missionId] });
     qc.invalidateQueries({ queryKey: ["notifications", missionId] });
   });
@@ -65,7 +73,9 @@ export default function MissionDetail() {
         <StatusPill tone={missionStatusTone(mission.status)}>{mission.status.replace("_", " ")}</StatusPill>
       </header>
 
-      <div className="flex gap-1 border-b border-slate-200 dark:border-slate-800">
+      <PersistentClockHeader mission={mission} />
+
+      <div className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800">
         {TABS.map((t) => (
           <button
             key={t}
@@ -81,41 +91,55 @@ export default function MissionDetail() {
         ))}
       </div>
 
-      {tab === "Overview" && <OverviewTab mission={mission} missionId={missionId!} useZulu={useZulu} targeted={targeted} />}
-      {tab === "Countdown & GO/NO-GO" && <CountdownTab mission={mission} missionId={missionId!} useZulu={useZulu} targeted={targeted} />}
+      {tab === "Overview" && <OverviewTab mission={mission} missionId={missionId!} useZulu={useZulu} onRequestScrub={() => setScrubModalOpen(true)} />}
+      {tab === "Countdown" && <CountdownTab mission={mission} onRequestScrub={() => setScrubModalOpen(true)} />}
+      {tab === "Polls" && <PollsTab mission={mission} missionId={missionId!} />}
       {tab === "FAA & NOTAM" && <FaaTab missionId={missionId!} targeted={targeted} useZulu={useZulu} />}
       {tab === "Log" && <LogTab mission={mission} missionId={missionId!} useZulu={useZulu} />}
       {tab === "History" && <HistoryTab mission={mission} useZulu={useZulu} />}
+      {tab === "LWCC" && <LwccTab missionId={missionId!} />}
+
+      {scrubModalOpen && <ScrubModal missionId={missionId!} onClose={() => setScrubModalOpen(false)} />}
     </div>
   );
 }
 
-function ActionButtons({ mission, missionId }: { mission: any; missionId: string }) {
+// ---------------------------------------------------------------------------
+// Launch Director actions (Section 3)
+// ---------------------------------------------------------------------------
+
+function ActionButtons({ mission, missionId, onRequestScrub }: { mission: any; missionId: string; onRequestScrub: () => void }) {
   const { isLaunchDirector } = useAuth();
   const qc = useQueryClient();
-  const [modal, setModal] = useState<"postpone" | "cancel" | "scrub" | "disposition" | "target" | null>(null);
+  const [modal, setModal] = useState<"postpone" | "cancel1" | "cancel2" | "disposition" | "target" | null>(null);
   const [notes, setNotes] = useState("");
+  const [confirmDesignator, setConfirmDesignator] = useState("");
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["mission", missionId] });
     qc.invalidateQueries({ queryKey: ["missions"] });
     qc.invalidateQueries({ queryKey: ["dashboard"] });
+    qc.invalidateQueries({ queryKey: ["countdown", missionId] });
   };
 
   const postpone = useMutation({ mutationFn: () => postponeMission(missionId, notes), onSuccess: () => (invalidate(), close()) });
-  const cancel = useMutation({ mutationFn: () => cancelMission(missionId, notes), onSuccess: () => (invalidate(), close()) });
-  const scrub = useMutation({ mutationFn: () => scrubMission(missionId, notes), onSuccess: () => (invalidate(), close()) });
+  const cancel = useMutation({
+    mutationFn: () => cancelMission(missionId, notes, confirmDesignator),
+    onSuccess: () => (invalidate(), close()),
+  });
 
   function close() {
     setModal(null);
     setNotes("");
+    setConfirmDesignator("");
   }
 
   if (!isLaunchDirector) return null;
 
   const untargeted = mission.launchPeriodEntries.filter((e: any) => !e.consumed && !e.isTargeted);
-  const canTarget = !["SCRUBBED", "CANCELLED", "SUCCESSFUL"].includes(mission.status) && untargeted.length > 0;
-  const canPostponeOrCancel = mission.status === "TARGETED" || mission.status === "PENDING_WINDOW" || mission.status === "HOLD";
+  const canTarget = !["CANCELLED", "SUCCESSFUL"].includes(mission.status) && untargeted.length > 0;
+  const canPostpone = !["CANCELLED", "SUCCESSFUL"].includes(mission.status);
+  const canCancel = !["CANCELLED", "SUCCESSFUL"].includes(mission.status);
   const canScrub = mission.status === "TARGETED";
   const canDisposition = mission.status === "TARGETED";
 
@@ -126,18 +150,18 @@ function ActionButtons({ mission, missionId }: { mission: any; missionId: string
           Select Target Launch Opportunity
         </button>
       )}
-      {canPostponeOrCancel && (
+      {canPostpone && (
         <button onClick={() => setModal("postpone")} className="btn-secondary">
-          Postpone
+          Postpone Indefinitely
         </button>
       )}
-      {canPostponeOrCancel && (
-        <button onClick={() => setModal("cancel")} className="btn-danger">
+      {canCancel && (
+        <button onClick={() => setModal("cancel1")} className="btn-danger">
           Cancel
         </button>
       )}
       {canScrub && (
-        <button onClick={() => setModal("scrub")} className="btn-danger">
+        <button onClick={onRequestScrub} className="btn-danger">
           Scrub
         </button>
       )}
@@ -149,39 +173,158 @@ function ActionButtons({ mission, missionId }: { mission: any; missionId: string
 
       {modal === "target" && <TargetModal missionId={missionId} entries={untargeted} onClose={close} onDone={invalidate} />}
 
-      {(modal === "postpone" || modal === "cancel" || modal === "scrub") && (
+      {modal === "postpone" && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
-            <h2 className="mb-1 text-lg font-bold capitalize">{modal} Mission</h2>
-            <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">A reason/notes entry is required and is logged to mission history.</p>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              placeholder="Reason / notes"
-              className="input"
-            />
+            <h2 className="mb-1 text-lg font-bold">Postpone Indefinitely</h2>
+            <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+              This voids ALL currently defined Launch Period entries for this mission, not just the targeted one. New windows may be
+              added afterward, which returns the mission to Pending Window.
+            </p>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Reason / notes" className="input" />
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={close} className="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700">
+              <button onClick={close} className="btn-secondary">
                 Back
               </button>
-              <button
-                onClick={() => {
-                  if (modal === "postpone") postpone.mutate();
-                  if (modal === "cancel") cancel.mutate();
-                  if (modal === "scrub") scrub.mutate();
-                }}
-                disabled={!notes.trim()}
-                className="rounded-md bg-aat-nogo px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                Confirm {modal}
+              <button onClick={() => postpone.mutate()} disabled={!notes.trim()} className="btn-danger disabled:opacity-50">
+                Confirm postpone
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {modal === "cancel1" && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+            <h2 className="mb-1 text-lg font-bold text-aat-nogo">Cancel Mission</h2>
+            <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+              This cancels the mission in its entirety, not just the current launch opportunity. This action is{" "}
+              <strong>irreversible and irrevocable</strong>.
+            </p>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Reason / notes" className="input" />
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={close} className="btn-secondary">
+                Back
+              </button>
+              <button onClick={() => setModal("cancel2")} disabled={!notes.trim()} className="btn-danger disabled:opacity-50">
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modal === "cancel2" && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+            <h2 className="mb-1 text-lg font-bold text-aat-nogo">Confirm Cancellation — Irreversible</h2>
+            <p className="mb-3 text-sm">
+              Type the mission designator <strong className="font-mono">{mission.designator}</strong> to confirm. This cannot be undone.
+            </p>
+            <input
+              value={confirmDesignator}
+              onChange={(e) => setConfirmDesignator(e.target.value)}
+              placeholder={mission.designator}
+              className="input font-mono"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={close} className="btn-secondary">
+                Back
+              </button>
+              <button
+                onClick={() => cancel.mutate()}
+                disabled={confirmDesignator.trim().toUpperCase() !== mission.designator.toUpperCase()}
+                className="btn-danger disabled:opacity-50"
+              >
+                CONFIRM CANCELLATION
+              </button>
+            </div>
+            {cancel.isError && <p className="mt-2 text-xs text-aat-nogo">{(cancel.error as any)?.response?.data?.error}</p>}
+          </div>
+        </div>
+      )}
+
       {modal === "disposition" && <DispositionModal missionId={missionId} onClose={close} onDone={invalidate} />}
+    </div>
+  );
+}
+
+function ScrubModal({ missionId, onClose }: { missionId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [notes, setNotes] = useState("");
+  const [result, setResult] = useState<{ remainingOpportunities: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["mission", missionId] });
+    qc.invalidateQueries({ queryKey: ["missions"] });
+    qc.invalidateQueries({ queryKey: ["dashboard"] });
+    qc.invalidateQueries({ queryKey: ["countdown", missionId] });
+  };
+
+  const scrub = useMutation({
+    mutationFn: () => scrubMission(missionId, notes),
+    onSuccess: (data) => {
+      invalidate();
+      setResult(data);
+      setError(null);
+    },
+    onError: (err: any) => setError(err?.response?.data?.error ?? "Scrub failed"),
+  });
+
+  if (result) {
+    return (
+      <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
+        <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+          <h2 className="mb-2 text-lg font-bold">Mission Scrubbed</h2>
+          <p className="mb-4 text-sm">
+            {result.remainingOpportunities > 0
+              ? `${result.remainingOpportunities} launch opportunity(ies) remain in this mission's Launch Period. Select a new target from the Overview tab, or Postpone Indefinitely if none are viable.`
+              : "No remaining launch opportunities in this mission's Launch Period. Postpone Indefinitely from the Overview tab, or add new windows first."}
+          </p>
+          <div className="flex justify-end">
+            <button onClick={onClose} className="btn-primary">
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-xl bg-white p-6 dark:bg-slate-900">
+        <h2 className="mb-1 text-lg font-bold text-aat-nogo">Scrub</h2>
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+          Only available with a confirmed Target Launch Opportunity, on the day of that opportunity.
+        </p>
+        <select
+          onChange={(e) => setNotes(e.target.value)}
+          defaultValue=""
+          className="input mb-2"
+        >
+          <option value="" disabled>
+            Reason category
+          </option>
+          <option value="Weather">Weather</option>
+          <option value="Vehicle">Vehicle</option>
+          <option value="Range">Range</option>
+          <option value="Personnel">Personnel</option>
+          <option value="Other">Other</option>
+        </select>
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Reason / notes (required)" className="input" />
+        {error && <p className="mt-2 text-xs font-semibold text-aat-nogo">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="btn-secondary">
+            Back
+          </button>
+          <button onClick={() => scrub.mutate()} disabled={!notes.trim()} className="btn-danger disabled:opacity-50">
+            Confirm scrub
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -217,13 +360,13 @@ function TargetModal({ missionId, entries, onClose, onDone }: { missionId: strin
               ))}
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={onClose} className="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700">
+              <button onClick={onClose} className="btn-secondary">
                 Cancel
               </button>
               <button
                 onClick={() => setConfirming(true)}
                 disabled={!selected}
-                className="rounded-md bg-aat-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                className="btn-primary disabled:opacity-50"
               >
                 Continue
               </button>
@@ -232,21 +375,17 @@ function TargetModal({ missionId, entries, onClose, onDone }: { missionId: strin
         ) : (
           <>
             <p className="text-sm">
-              Confirm mission will target{" "}
+              Mission <strong>{missionId.slice(0, 8)}</strong> will target{" "}
               <strong>
                 {formatTimestamp(entry.windowOpen, useZulu)} – {formatTimestamp(entry.windowClose, useZulu)}
               </strong>
-              ? This will lock in FAA/ATC notification requirements.
+              . Confirming will lock in FAA/ATC notification requirements and open the LOT submission gate on the Countdown tab.
             </p>
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setConfirming(false)} className="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700">
+              <button onClick={() => setConfirming(false)} className="btn-secondary">
                 Back
               </button>
-              <button
-                onClick={() => mutation.mutate()}
-                disabled={mutation.isPending}
-                className="rounded-md bg-aat-accent px-4 py-2 text-sm font-semibold text-white"
-              >
+              <button onClick={() => mutation.mutate()} disabled={mutation.isPending} className="btn-primary">
                 Confirm Target
               </button>
             </div>
@@ -261,21 +400,43 @@ function DispositionModal({ missionId, onClose, onDone }: { missionId: string; o
   const [form, setForm] = useState({
     outcome: "Successful",
     actualLiftoffTime: "",
-    apogeeAltitudeMeters: "",
     flightDurationSeconds: "",
-    vehiclePerformanceNotes: "",
-    payloadOutcome: "",
+    apogeeAltitudeAglMeters: "",
+    apogeeAltitudeMslMeters: "",
+    maxVelocityMs: "",
+    maxAccelerationG: "",
+    actualTotalImpulseNs: "",
     recoveryStatus: "",
-    anomaliesNotes: "",
+    payloadOutcome: "",
+    anomalySummary: "",
+    anomalyReferenceNote: "",
+    vehiclePerformanceNotes: "",
+    missionNotes: "",
   });
+  const [file, setFile] = useState<File | null>(null);
+
   const mutation = useMutation({
-    mutationFn: () =>
-      logDisposition(missionId, {
+    mutationFn: async () => {
+      const numeric = (v: string) => (v ? Number(v) : null);
+      await logDisposition(missionId, {
         ...form,
         actualLiftoffTime: form.actualLiftoffTime ? new Date(form.actualLiftoffTime).toISOString() : null,
-        apogeeAltitudeMeters: form.apogeeAltitudeMeters ? Number(form.apogeeAltitudeMeters) : null,
-        flightDurationSeconds: form.flightDurationSeconds ? Number(form.flightDurationSeconds) : null,
-      }),
+        flightDurationSeconds: numeric(form.flightDurationSeconds),
+        apogeeAltitudeAglMeters: numeric(form.apogeeAltitudeAglMeters),
+        apogeeAltitudeMslMeters: numeric(form.apogeeAltitudeMslMeters),
+        maxVelocityMs: numeric(form.maxVelocityMs),
+        maxAccelerationG: numeric(form.maxAccelerationG),
+        actualTotalImpulseNs: numeric(form.actualTotalImpulseNs),
+      });
+      if (file) {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("title", `Post-Flight Report — ${missionId.slice(0, 8)}`);
+        fd.append("category", "Post-Flight/Anomaly Report");
+        fd.append("missionId", missionId);
+        await uploadDocument(fd);
+      }
+    },
     onSuccess: () => {
       onDone();
       onClose();
@@ -287,58 +448,44 @@ function DispositionModal({ missionId, onClose, onDone }: { missionId: string; o
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 dark:bg-slate-900">
         <h2 className="mb-4 text-lg font-bold">Flight Disposition</h2>
         <div className="space-y-3">
+          <select value={form.outcome} onChange={(e) => setForm({ ...form, outcome: e.target.value })} className="input">
+            {DISPOSITION_OUTCOMES.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
           <input
             type="datetime-local"
             value={form.actualLiftoffTime}
             onChange={(e) => setForm({ ...form, actualLiftoffTime: e.target.value })}
             className="input"
           />
+          <p className="text-[10px] text-slate-400">Leave blank to use the liftoff time established via MARK LIFTOFF on the Countdown tab.</p>
+          <input placeholder="Total flight time, burnout → recovery (s)" value={form.flightDurationSeconds} onChange={(e) => setForm({ ...form, flightDurationSeconds: e.target.value })} className="input" />
           <div className="grid grid-cols-2 gap-2">
-            <input
-              placeholder="Apogee (m)"
-              value={form.apogeeAltitudeMeters}
-              onChange={(e) => setForm({ ...form, apogeeAltitudeMeters: e.target.value })}
-              className="input"
-            />
-            <input
-              placeholder="Flight duration (s)"
-              value={form.flightDurationSeconds}
-              onChange={(e) => setForm({ ...form, flightDurationSeconds: e.target.value })}
-              className="input"
-            />
+            <input placeholder="Apogee AGL (m)" value={form.apogeeAltitudeAglMeters} onChange={(e) => setForm({ ...form, apogeeAltitudeAglMeters: e.target.value })} className="input" />
+            <input placeholder="Apogee MSL (m)" value={form.apogeeAltitudeMslMeters} onChange={(e) => setForm({ ...form, apogeeAltitudeMslMeters: e.target.value })} className="input" />
+            <input placeholder="Max velocity (m/s)" value={form.maxVelocityMs} onChange={(e) => setForm({ ...form, maxVelocityMs: e.target.value })} className="input" />
+            <input placeholder="Max accel/Q (G)" value={form.maxAccelerationG} onChange={(e) => setForm({ ...form, maxAccelerationG: e.target.value })} className="input" />
           </div>
-          <textarea
-            placeholder="Vehicle performance notes"
-            value={form.vehiclePerformanceNotes}
-            onChange={(e) => setForm({ ...form, vehiclePerformanceNotes: e.target.value })}
-            className="input"
-            rows={2}
-          />
-          <input
-            placeholder="Payload outcome"
-            value={form.payloadOutcome}
-            onChange={(e) => setForm({ ...form, payloadOutcome: e.target.value })}
-            className="input"
-          />
-          <input
-            placeholder="Recovery status"
-            value={form.recoveryStatus}
-            onChange={(e) => setForm({ ...form, recoveryStatus: e.target.value })}
-            className="input"
-          />
-          <textarea
-            placeholder="Anomalies noted post-flight"
-            value={form.anomaliesNotes}
-            onChange={(e) => setForm({ ...form, anomaliesNotes: e.target.value })}
-            className="input"
-            rows={2}
-          />
+          <input placeholder="Actual total impulse, as flown (N·s)" value={form.actualTotalImpulseNs} onChange={(e) => setForm({ ...form, actualTotalImpulseNs: e.target.value })} className="input" />
+          <input placeholder="Recovery status / location" value={form.recoveryStatus} onChange={(e) => setForm({ ...form, recoveryStatus: e.target.value })} className="input" />
+          <input placeholder="Payload outcome" value={form.payloadOutcome} onChange={(e) => setForm({ ...form, payloadOutcome: e.target.value })} className="input" />
+          <textarea placeholder="Anomaly summary" value={form.anomalySummary} onChange={(e) => setForm({ ...form, anomalySummary: e.target.value })} className="input" rows={2} />
+          <input placeholder="Anomaly investigation reference (doc/case #)" value={form.anomalyReferenceNote} onChange={(e) => setForm({ ...form, anomalyReferenceNote: e.target.value })} className="input" />
+          <textarea placeholder="Vehicle performance notes" value={form.vehiclePerformanceNotes} onChange={(e) => setForm({ ...form, vehiclePerformanceNotes: e.target.value })} className="input" rows={2} />
+          <textarea placeholder="General mission notes/summary" value={form.missionNotes} onChange={(e) => setForm({ ...form, missionNotes: e.target.value })} className="input" rows={2} />
+          <div>
+            <label className="mb-1 block text-[10px] font-semibold uppercase text-slate-400">Post-flight report attachment</label>
+            <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="w-full text-xs" />
+          </div>
         </div>
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700">
+          <button onClick={onClose} className="btn-secondary">
             Cancel
           </button>
-          <button onClick={() => mutation.mutate()} className="rounded-md bg-aat-accent px-4 py-2 text-sm font-semibold text-white">
+          <button onClick={() => mutation.mutate()} className="btn-primary">
             Log Disposition
           </button>
         </div>
@@ -347,10 +494,11 @@ function DispositionModal({ missionId, onClose, onDone }: { missionId: string; o
   );
 }
 
-function OverviewTab({ mission, missionId, useZulu, targeted }: any) {
+function OverviewTab({ mission, missionId, useZulu, onRequestScrub }: any) {
   const { isLaunchDirector } = useAuth();
   const qc = useQueryClient();
   const [newEntry, setNewEntry] = useState({ date: "", windowOpen: "", windowClose: "" });
+  const [addendumText, setAddendumText] = useState("");
 
   const addEntry = useMutation({
     mutationFn: () =>
@@ -368,6 +516,15 @@ function OverviewTab({ mission, missionId, useZulu, targeted }: any) {
     mutationFn: (entryId: string) => removeLaunchPeriodEntry(missionId, entryId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mission", missionId] }),
   });
+  const addendumMutation = useMutation({
+    mutationFn: () => addDispositionAddendum(missionId, addendumText),
+    onSuccess: () => {
+      setAddendumText("");
+      qc.invalidateQueries({ queryKey: ["mission", missionId] });
+    },
+  });
+
+  const openChecklist = mission.launchDayNotifications?.filter((n: any) => !n.satisfied && !n.notApplicable).length ?? 0;
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -394,6 +551,7 @@ function OverviewTab({ mission, missionId, useZulu, targeted }: any) {
                 )}
               </div>
             ))}
+            {mission.launchPeriodEntries.length === 0 && <div className="text-sm text-slate-400">No launch period windows defined.</div>}
           </div>
           {isLaunchDirector && (
             <div className="mt-3 grid grid-cols-4 gap-2">
@@ -423,29 +581,61 @@ function OverviewTab({ mission, missionId, useZulu, targeted }: any) {
 
         <section className="card p-5">
           <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Launch Director Actions</div>
-          <ActionButtons mission={mission} missionId={missionId} />
+          <ActionButtons mission={mission} missionId={missionId} onRequestScrub={onRequestScrub} />
         </section>
 
         {mission.disposition && (
           <section className="card p-5">
-            <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Flight Disposition</div>
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Flight Disposition</div>
+              <StatusPill tone={mission.disposition.outcome === "Successful" ? "go" : mission.disposition.outcome === "Failure" ? "nogo" : "caution"}>
+                {mission.disposition.outcome}
+              </StatusPill>
+            </div>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <Field label="Liftoff" value={formatTimestamp(mission.disposition.actualLiftoffTime, useZulu)} />
-              <Field label="Apogee" value={mission.disposition.apogeeAltitudeMeters ? `${mission.disposition.apogeeAltitudeMeters} m` : "--"} />
-              <Field
-                label="Flight duration"
-                value={mission.disposition.flightDurationSeconds ? `${mission.disposition.flightDurationSeconds} s` : "--"}
-              />
+              <Field label="Flight time" value={mission.disposition.flightDurationSeconds ? `${mission.disposition.flightDurationSeconds} s` : "--"} />
+              <Field label="Apogee AGL" value={mission.disposition.apogeeAltitudeAglMeters ? `${mission.disposition.apogeeAltitudeAglMeters} m` : "--"} />
+              <Field label="Apogee MSL" value={mission.disposition.apogeeAltitudeMslMeters ? `${mission.disposition.apogeeAltitudeMslMeters} m` : "--"} />
+              <Field label="Max velocity" value={mission.disposition.maxVelocityMs ? `${mission.disposition.maxVelocityMs} m/s` : "--"} />
+              <Field label="Max accel/Q" value={mission.disposition.maxAccelerationG ? `${mission.disposition.maxAccelerationG} G` : "--"} />
               <Field label="Recovery" value={mission.disposition.recoveryStatus || "--"} />
-              <Field label="Payload outcome" value={mission.disposition.payloadOutcome || "--"} span2 />
-              <Field label="Vehicle performance notes" value={mission.disposition.vehiclePerformanceNotes || "--"} span2 />
-              <Field label="Anomalies" value={mission.disposition.anomaliesNotes || "--"} span2 />
+              <Field label="Payload outcome" value={mission.disposition.payloadOutcome || "--"} />
+              <Field label="Anomaly summary" value={mission.disposition.anomalySummary || "--"} span2 />
+              <Field label="Mission notes" value={mission.disposition.missionNotes || "--"} span2 />
             </div>
+            {mission.disposition.addenda?.length > 0 && (
+              <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+                <div className="text-[10px] font-semibold uppercase text-slate-400">Addenda</div>
+                {mission.disposition.addenda.map((a: any) => (
+                  <div key={a.id} className="text-xs">
+                    <span className="text-slate-400">[{formatTimestamp(a.timestamp, useZulu)}] {a.author.name}:</span> {a.text}
+                  </div>
+                ))}
+              </div>
+            )}
+            {isLaunchDirector && (
+              <div className="mt-3 flex gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+                <input value={addendumText} onChange={(e) => setAddendumText(e.target.value)} placeholder="Append correction/addendum" className="input" />
+                <button onClick={() => addendumText.trim() && addendumMutation.mutate()} className="btn-secondary text-xs">
+                  Add
+                </button>
+              </div>
+            )}
           </section>
         )}
       </div>
 
       <div className="space-y-6">
+        <section className="card p-5">
+          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Vehicle</div>
+          <Link to={`/vehicles/${mission.vehicle.id}`} className="font-medium text-aat-accent hover:underline">
+            {mission.vehicle.name}
+          </Link>
+          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            {mission.vehicle.vehicleClass || mission.vehicle.type || ""} {mission.vehicle.motorType ? `· ${mission.vehicle.motorType}` : ""}
+          </div>
+        </section>
         <section className="card p-5">
           <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Payload</div>
           <p className="text-sm">{mission.payloadDescription || "No payload description on file."}</p>
@@ -463,6 +653,14 @@ function OverviewTab({ mission, missionId, useZulu, targeted }: any) {
             ) : (
               <span className="text-slate-400">No personnel assigned.</span>
             )}
+          </div>
+        </section>
+        <section className="card p-5">
+          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Status Summary</div>
+          <div className="space-y-1 text-xs">
+            <div>LWCC: see LWCC tab</div>
+            <div>FAA checklist: {openChecklist > 0 ? `${openChecklist} item(s) outstanding` : "satisfied / not yet applicable"}</div>
+            <div>T-COUNT: see clock header above</div>
           </div>
         </section>
         <section className="card p-5">
@@ -489,72 +687,31 @@ function WeatherSummary({ siteId, vehicle }: { siteId: string; vehicle: any }) {
   const exceeded = vehicle?.windMaxKts != null && weather.windSpeedKts != null && weather.windSpeedKts > vehicle.windMaxKts;
   return (
     <div className="space-y-1 text-sm">
-      <div>Wind: {weather.windSpeedKts?.toFixed(0) ?? "--"} kt {exceeded && <span className="text-aat-nogo font-semibold">(exceeds limit)</span>}</div>
+      <div>
+        Wind: {weather.windSpeedKts?.toFixed(0) ?? "--"} kt {exceeded && <span className="font-semibold text-aat-nogo">(exceeds limit)</span>}
+      </div>
       <div>Ceiling: {weather.cloudCeilingFt?.toFixed(0) ?? "--"} ft</div>
       <div>Temp: {weather.temperatureC?.toFixed(1) ?? "--"} °C</div>
     </div>
   );
 }
 
-function CountdownTab({ mission, missionId, useZulu, targeted }: any) {
+function PollsTab({ mission, missionId }: any) {
   const qc = useQueryClient();
-  const [now, setNow] = useState(new Date());
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  const updateMilestoneMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) => updateMilestone(missionId, id, { status }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["mission", missionId] }),
-  });
   const updatePoll = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => updateGoNoGo(missionId, id, { status }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mission", missionId] }),
     onError: (err: any) => alert(err?.response?.data?.error ?? "Failed to update poll"),
   });
 
-  const countdown = targeted ? formatCountdown(targeted.windowOpen, now) : null;
-
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-      <div className="lg:col-span-2 space-y-6">
-        <section className="card flex flex-col items-center justify-center bg-aat-navy p-8 text-white">
-          <div className="text-xs uppercase tracking-widest text-slate-400">{targeted ? "Countdown to window open" : "No targeted opportunity"}</div>
-          <div className="font-mono text-5xl font-bold tabular-nums">{countdown?.text ?? "--:--:--"}</div>
-        </section>
-
-        <section className="card p-5">
-          <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Milestone Timeline</div>
-          <div className="space-y-1">
-            {mission.milestones
-              ?.slice()
-              .sort((a: any, b: any) => b.tMinusSeconds - a.tMinusSeconds)
-              .map((m: any) => (
-                <div key={m.id} className="flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
-                  <div>
-                    <span className="font-mono text-xs text-slate-500">T-{formatDuration(m.tMinusSeconds)}</span>{" "}
-                    <span className="ml-2">{m.label}</span>
-                  </div>
-                  <select
-                    value={m.status}
-                    onChange={(e) => updateMilestoneMutation.mutate({ id: m.id, status: e.target.value })}
-                    className={`rounded-md border px-2 py-1 text-xs ${milestoneColor(m.status)}`}
-                  >
-                    {["UPCOMING", "IN_PROGRESS", "COMPLETE", "HELD"].map((s) => (
-                      <option key={s} value={s}>
-                        {s.replace("_", " ")}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-          </div>
-        </section>
-      </div>
-
+    <div className="mx-auto max-w-2xl">
       <section className="card p-5">
-        <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">GO / NO-GO Poll</div>
+        <div className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Launch Status Check</div>
+        <p className="mb-3 text-[11px] text-slate-400">
+          Each discipline station reports independently, rolling up to a single Launch Director final call. FAA/Airspace remains gated by
+          the launch-day notification checklist (FAA & NOTAM tab).
+        </p>
         <div className="space-y-2">
           {mission.goNoGoPolls?.map((poll: any) => (
             <div key={poll.id} className="flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
@@ -573,31 +730,11 @@ function CountdownTab({ mission, missionId, useZulu, targeted }: any) {
             </div>
           ))}
         </div>
-        <p className="mt-2 text-[11px] text-slate-400">FAA/Airspace cannot show GO until the launch-day notification checklist is fully satisfied.</p>
       </section>
     </div>
   );
 }
 
-function formatDuration(seconds: number) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-function milestoneColor(status: string) {
-  switch (status) {
-    case "COMPLETE":
-      return "border-aat-go text-aat-go";
-    case "IN_PROGRESS":
-      return "border-aat-caution text-aat-caution";
-    case "HELD":
-      return "border-aat-nogo text-aat-nogo";
-    default:
-      return "border-slate-300 dark:border-slate-700";
-  }
-}
 function pollColor(status: string) {
   switch (status) {
     case "GO":
@@ -622,6 +759,7 @@ function FaaTab({ missionId, targeted, useZulu }: { missionId: string; targeted:
   const qc = useQueryClient();
   const { data: notam } = useQuery({ queryKey: ["notam", missionId], queryFn: () => fetchNotamStatus(missionId) });
   const { data: notifications } = useQuery({ queryKey: ["notifications", missionId], queryFn: () => fetchLaunchDayNotifications(missionId) });
+  const { data: mission } = useQuery({ queryKey: ["mission", missionId], queryFn: () => fetchMission(missionId) });
   const [notamForm, setNotamForm] = useState({ leidosConfirmationNumber: "", notamWindowOpen: "", notamWindowClose: "" });
 
   const fileNotamMutation = useMutation({
@@ -636,13 +774,24 @@ function FaaTab({ missionId, targeted, useZulu }: { missionId: string; targeted:
   });
 
   const isTargetedToday = targeted && new Date(targeted.date).toDateString() === new Date().toDateString();
+  const site = mission?.site;
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      {site && (site.traconFacilityName || site.artccFacilityName) && (
+        <section className="card p-5 lg:col-span-2">
+          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Facility Cross-Reference</div>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <Field label="TRACON" value={site.traconFacilityName ? `${site.traconFacilityName}${site.traconPhone ? ` — ${site.traconPhone}` : ""}` : "--"} />
+            <Field label="ARTCC" value={site.artccFacilityName ? `${site.artccFacilityName}${site.artccPhone ? ` — ${site.artccPhone}` : ""}` : "--"} />
+          </div>
+        </section>
+      )}
+
       <section className="card p-5">
         <div className="mb-2 flex items-center justify-between">
           <div className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            Weekly Advance Notice (Leidos / NOTAM)
+            Weekly Advance Notice (Leidos / NOTAM) — 14 CFR Part 101
           </div>
           <StatusPill tone={notam?.status === "FILED" ? "go" : notam?.status === "OVERDUE" ? "nogo" : "caution"}>
             {notam?.status?.replace("_", " ") ?? "--"}
@@ -682,7 +831,6 @@ function FaaTab({ missionId, targeted, useZulu }: { missionId: string; targeted:
                 className="input"
               />
             </div>
-            <p className="text-[11px] text-slate-400">Default filed window should be broader than the internal launch window (e.g. 6 hrs margin).</p>
             <button onClick={() => fileNotamMutation.mutate()} className="rounded-md bg-aat-accent px-3 py-2 text-xs font-semibold text-white">
               Log NOTAM Filing
             </button>
@@ -805,7 +953,7 @@ function HistoryTab({ mission, useZulu }: any) {
         {mission.historyEvents?.map((ev: any) => (
           <div key={ev.id} className="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
             <div className="flex items-center justify-between">
-              <span className="font-semibold">{ev.eventType}</span>
+              <span className="font-semibold">{ev.eventType.replace(/_/g, " ")}</span>
               <span className="text-xs text-slate-400">{formatTimestamp(ev.timestamp, useZulu)}</span>
             </div>
             {ev.actor && <div className="text-xs text-slate-500 dark:text-slate-400">by {ev.actor.name}</div>}

@@ -19,6 +19,8 @@ import documentRoutes from "./routes/documents";
 import adminRoutes from "./routes/admin";
 import dashboardRoutes from "./routes/dashboard";
 import faaSummaryRoutes from "./routes/faaSummary";
+import countdownRoutes from "./routes/countdown";
+import lwccRoutes from "./routes/lwcc";
 
 const app = express();
 app.use(helmet());
@@ -37,6 +39,8 @@ app.use("/api/vehicles", requireAuth, vehicleRoutes);
 app.use("/api/missions", requireAuth, missionRoutes);
 app.use("/api/missions/:missionId/notam", requireAuth, notamRoutes);
 app.use("/api/missions/:missionId/notifications", requireAuth, notificationRoutes);
+app.use("/api/missions/:missionId/countdown", requireAuth, countdownRoutes);
+app.use("/api/missions/:missionId/lwcc", requireAuth, lwccRoutes);
 app.use("/api/coa", requireAuth, coaRoutes);
 app.use("/api/documents", requireAuth, documentRoutes);
 app.use("/api/admin", requireAuth, adminRoutes);
