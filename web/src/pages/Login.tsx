@@ -49,11 +49,11 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-black px-4 py-8">
-      <div className="w-full max-w-md space-y-4">
-        <div className="border border-aat-caution bg-aat-caution/10 px-4 py-3 text-center">
+    <div className="flex min-h-screen items-center justify-center overflow-y-auto bg-black px-4 py-3">
+      <div className="grid w-full max-w-4xl gap-3 md:grid-cols-[1fr_1.1fr] md:items-stretch">
+        <div className="flex flex-col justify-center border border-aat-caution bg-aat-caution/10 px-5 py-4 text-center md:text-left">
           <p className="text-xs font-bold uppercase tracking-wide text-aat-caution">ITAR-Controlled // Distribution Is Limited</p>
-          <p className="normal-case mt-1 text-[11px] leading-snug text-zinc-300">
+          <p className="normal-case mt-2 text-[11px] leading-snug text-zinc-300">
             This system contains ITAR-controlled technical data as defined in 22 CFR Part 120.10. Access is restricted to U.S. persons as
             defined in 22 CFR Part 120.15. No foreign dissemination is permitted. Unauthorized access, disclosure, transfer, export, or
             re-export of the technical data contained herein is prohibited under the Arms Export Control Act (22 U.S.C. 2751 et seq.) and
@@ -62,15 +62,15 @@ export default function Login() {
           </p>
         </div>
 
-        <div className="border border-zinc-800 bg-aat-steel p-8">
-          <div className="mb-8 flex flex-col items-center gap-2 text-center">
-            <div className="flex h-12 w-12 items-center justify-center border border-white bg-white text-xl font-bold text-black">A</div>
-            <h1 className="text-lg font-semibold text-white">AAT Launch Operations Division</h1>
+        <div className="border border-zinc-800 bg-aat-steel p-5">
+          <div className="mb-3 flex flex-col items-center gap-1 text-center">
+            <div className="flex h-10 w-10 items-center justify-center border border-white bg-white text-lg font-bold text-black">A</div>
+            <h1 className="text-base font-semibold text-white">AAT Launch Operations Division</h1>
             <p className="text-xs tracking-widest text-zinc-400">Internal Use // Company Confidential</p>
           </div>
 
           {!forgotMode ? (
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-3">
               <div>
                 <label className="mb-1 block text-xs font-medium text-zinc-400">Email</label>
                 <input
@@ -87,7 +87,7 @@ export default function Login() {
                 <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="input" placeholder="••••••••" />
               </div>
 
-              <label className="flex items-start gap-2 border border-zinc-700 p-3 text-left">
+              <label className="flex max-h-32 items-start gap-2 overflow-y-auto border border-zinc-700 p-2.5 text-left">
                 <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} className="mt-0.5 shrink-0" />
                 <span className="normal-case text-[11px] leading-snug text-zinc-300">{CONFIDENTIALITY_TEXT}</span>
               </label>
