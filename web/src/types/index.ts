@@ -271,6 +271,7 @@ export interface MissionHold {
   holdMarkSeconds: number;
   estimatedDurationSeconds?: number | null;
   status: HoldStatus;
+  autoProceed: boolean;
   reason?: string | null;
   actualStartedAt?: string | null;
   actualEndedAt?: string | null;

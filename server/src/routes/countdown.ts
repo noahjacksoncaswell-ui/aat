@@ -201,34 +201,34 @@ router.delete("/holds/:holdId", requireLaunchDirector, async (req, res) => {
   res.status(204).send();
 });
 
-// Client-driven trigger: fired once the locally-ticking Test Clock crosses a
-// SCHEDULED hold's mark. Re-validated server-side before activating.
-router.post("/holds/:holdId/trigger", requireConsole, async (req, res) => {
-  const mId = missionId(req);
-  const mission = await loadMissionWithHolds(mId);
-  if (!mission) return res.status(404).json({ error: "Mission not found" });
-  const hold = mission.holds.find((h) => h.id === req.params.holdId);
-  if (!hold) return res.status(404).json({ error: "Hold not found" });
-  if (hold.status !== "SCHEDULED") return res.status(200).json(hold); // idempotent no-op
+// v4.1 Item 2 - Auto-Proceed/Manual-Proceed toggle, live-adjustable in
+// either direction for the entire time a PROGRAMMED hold is ACTIVE (never
+// fixed at scheduling time, never locked once active). Read by the same
+// live scheduler (services/holdScheduler.ts) that triggers the hold in the
+// first place, so flipping it to Auto mid-hold takes effect on the very
+// next tick, not on some later page load.
+router.patch("/holds/:holdId/auto-proceed", requireLaunchDirector, async (req, res) => {
+  const parsed = z.object({ autoProceed: z.boolean() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "autoProceed (boolean) is required" });
 
-  const alreadyActive = mission.holds.find((h) => h.status === "ACTIVE");
-  if (alreadyActive) return res.status(400).json({ error: "Another hold is already active" });
+  const hold = await prisma.missionHold.findUnique({ where: { id: req.params.holdId } });
+  if (!hold || hold.missionId !== missionId(req)) return res.status(404).json({ error: "Hold not found" });
+  if (hold.type !== "PROGRAMMED") return res.status(400).json({ error: "Auto-Proceed only applies to programmed holds" });
+  if (hold.status !== "ACTIVE") return res.status(400).json({ error: "Auto-Proceed can only be changed while the hold is active" });
 
-  const currentTMinus = computeTCountSeconds(mission, null);
-  if (currentTMinus == null || currentTMinus > hold.holdMarkSeconds) {
-    return res.status(400).json({ error: "Hold mark has not yet been reached" });
-  }
-
-  const [updatedHold] = await prisma.$transaction([
-    prisma.missionHold.update({ where: { id: hold.id }, data: { status: "ACTIVE", actualStartedAt: new Date() } }),
-    prisma.mission.update({ where: { id: mId }, data: { tCountStatus: "HOLDING" } }),
-    prisma.missionHistoryEvent.create({
-      data: { missionId: mId, eventType: MissionHistoryEventType.HOLD_CALLED, notes: `Programmed hold reached at T-${hold.holdMarkSeconds}s`, metadata: { holdId: hold.id } },
-    }),
-  ]);
-  broadcastMissionUpdate(mId);
-  res.json(updatedHold);
+  const updated = await prisma.missionHold.update({ where: { id: hold.id }, data: { autoProceed: parsed.data.autoProceed } });
+  broadcastMissionUpdate(missionId(req));
+  res.json(updated);
 });
+
+// v4.1 Item 1 - hold triggering used to be a client-driven POST fired from
+// CountdownTab.tsx's ticking clock, which meant a hold's mark was only ever
+// detected while that specific component happened to be mounted somewhere -
+// the root cause of the late-trigger defect. That responsibility now
+// belongs entirely to the server-side hold scheduler
+// (services/holdScheduler.ts), which runs continuously and is the sole
+// source of truth regardless of any connected client; there is no
+// client-callable trigger endpoint anymore.
 
 type CallHoldResult =
   | { ok: true; hold: Awaited<ReturnType<typeof prisma.missionHold.create>> }

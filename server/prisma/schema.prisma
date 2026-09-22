@@ -446,6 +446,11 @@ model MissionHold {
   holdMarkSeconds          Int // T-minus seconds from LOT at which this hold engages/engaged
   estimatedDurationSeconds Int?
   status                   HoldStatus @default(SCHEDULED)
+  // v4.1 Item 2 - PROGRAMMED holds only. When true, the server-side hold
+  // scheduler releases the hold automatically the instant estimatedDurationSeconds
+  // elapses; when false (default), it goes into DURATION ELAPSED / HOLD ELAPSED
+  // overage and a Launch Director must press Proceed Through Hold.
+  autoProceed              Boolean    @default(false)
   reason                   String?
   actualStartedAt          DateTime?
   actualEndedAt            DateTime?

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addProgrammedHold,
@@ -13,8 +13,8 @@ import {
   removeHold,
   resetMilestoneSequence,
   reviseLot,
+  setHoldAutoProceed,
   submitLot,
-  triggerHold,
   updateMilestone,
   uploadDocument,
 } from "../api/resources";
@@ -39,11 +39,16 @@ function hmsToSeconds(hms: string): number {
 
 export default function CountdownTab({ mission, onRequestScrub }: { mission: Mission; onRequestScrub: () => void }) {
   const { isLaunchDirector, isAdmin } = useAuth();
-  const qc = useQueryClient();
   const [now, setNow] = useState(new Date());
   const [fetchedAt, setFetchedAt] = useState(new Date());
-  const triggeredRef = useRef<Set<string>>(new Set());
 
+  // v4.1 Item 1 - hold triggering (and Item 2's Auto-Proceed release) is
+  // decided entirely server-side by the always-running hold scheduler
+  // (server/src/services/holdScheduler.ts), not by this component. This
+  // query just displays that state; MissionDetail's websocket subscription
+  // invalidates it the instant the scheduler broadcasts a change, so the
+  // freeze/banner appears live regardless of whether this tab was ever
+  // navigated away from.
   const { data: state } = useQuery({
     queryKey: ["countdown", mission.id],
     queryFn: () => fetchCountdownState(mission.id),
@@ -60,23 +65,6 @@ export default function CountdownTab({ mission, onRequestScrub }: { mission: Mis
   }, []);
 
   const tMinus = tickTMinusSeconds(state, fetchedAt, now);
-
-  const triggerMutation = useMutation({
-    mutationFn: (holdId: string) => triggerHold(mission.id, holdId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["countdown", mission.id] }),
-  });
-
-  // Client-driven auto-trigger: fire once when the ticking clock crosses a scheduled hold mark.
-  useEffect(() => {
-    if (!state || tMinus == null || state.tCountStatus !== "COUNTING") return;
-    for (const hold of state.holds) {
-      if (hold.status === "SCHEDULED" && tMinus <= hold.holdMarkSeconds && !triggeredRef.current.has(hold.id)) {
-        triggeredRef.current.add(hold.id);
-        triggerMutation.mutate(hold.id);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tMinus, state?.tCountStatus]);
 
   if (!state) return <div className="p-6 text-slate-400">Loading countdown state...</div>;
 
@@ -175,6 +163,11 @@ function HoldManagement({ mission, state, isLaunchDirector }: { mission: Mission
       setCallReason("");
     },
   });
+  const autoProceedMutation = useMutation({
+    mutationFn: ({ holdId, autoProceed }: { holdId: string; autoProceed: boolean }) => setHoldAutoProceed(mission.id, holdId, autoProceed),
+    onSuccess: invalidate,
+  });
+  const [showAutoConfirm, setShowAutoConfirm] = useState(false);
 
   const activeHold: MissionHold | undefined = state.holds.find((h: MissionHold) => h.status === "ACTIVE");
 
@@ -196,15 +189,68 @@ function HoldManagement({ mission, state, isLaunchDirector }: { mission: Mission
               <strong>ACTIVE HOLD</strong> at T-{secondsToHms(activeHold.holdMarkSeconds)} — {activeHold.type}
               {activeHold.reason ? ` — ${activeHold.reason}` : ""}
             </div>
-            {isLaunchDirector && (
-              <button onClick={() => releaseHoldMutation.mutate(activeHold.id)} className="btn-primary text-xs">
-                Proceed Through Hold
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {isLaunchDirector && activeHold.type === "PROGRAMMED" && (
+                <label className="flex items-center gap-1.5 text-xs">
+                  <span className={activeHold.autoProceed ? "text-slate-500" : "font-semibold"}>Manual-Proceed</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={activeHold.autoProceed}
+                    onClick={() => {
+                      if (activeHold.autoProceed) {
+                        // Auto -> Manual: immediate, no confirmation.
+                        autoProceedMutation.mutate({ holdId: activeHold.id, autoProceed: false });
+                      } else {
+                        // Manual -> Auto: lightweight single confirmation.
+                        setShowAutoConfirm(true);
+                      }
+                    }}
+                    className={`relative h-4 w-8 shrink-0 rounded-full transition-colors ${activeHold.autoProceed ? "bg-aat-accent" : "bg-slate-600"}`}
+                  >
+                    <span
+                      className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${activeHold.autoProceed ? "translate-x-4" : "translate-x-0.5"}`}
+                    />
+                  </button>
+                  <span className={activeHold.autoProceed ? "font-semibold text-aat-accent" : "text-slate-500"}>Auto-Proceed</span>
+                </label>
+              )}
+              {isLaunchDirector && (
+                <button onClick={() => releaseHoldMutation.mutate(activeHold.id)} className="btn-primary text-xs">
+                  Proceed Through Hold
+                </button>
+              )}
+            </div>
           </div>
           {activeHold.actualStartedAt && (
             <ElapsedIndicator startedAt={activeHold.actualStartedAt} estimatedSeconds={activeHold.estimatedDurationSeconds ?? undefined} />
           )}
+        </div>
+      )}
+
+      {showAutoConfirm && activeHold && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-zinc-800 bg-black p-6">
+            <h2 className="mb-2 text-base font-bold">Switch to Auto-Proceed?</h2>
+            <p className="mb-4 text-sm text-slate-300">
+              The system will automatically release this hold and resume the Test Clock the instant the estimated duration elapses, with
+              no further confirmation.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowAutoConfirm(false)} className="btn-secondary">
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  autoProceedMutation.mutate({ holdId: activeHold.id, autoProceed: true });
+                  setShowAutoConfirm(false);
+                }}
+                className="btn-primary"
+              >
+                Confirm Auto-Proceed
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -515,7 +561,7 @@ function VehicleLcpCrossReference({ mission, isLaunchDirector }: { mission: Miss
   const [file, setFile] = useState<File | null>(null);
   const { data: docs } = useQuery({
     queryKey: ["vehicle-lcp", mission.id, mission.vehicleId],
-    queryFn: () => fetchDocuments({ missionId: mission.id, category: "Launch Countdown Procedure (LCP)" }),
+    queryFn: () => fetchDocuments({ missionId: mission.id, category: "Launch Countdown Procedure" }),
   });
 
   const uploadMutation = useMutation({
@@ -523,7 +569,7 @@ function VehicleLcpCrossReference({ mission, isLaunchDirector }: { mission: Miss
       const fd = new FormData();
       fd.append("file", file!);
       fd.append("title", `${mission.vehicle.name} LCP — ${mission.designator}`);
-      fd.append("category", "Launch Countdown Procedure (LCP)");
+      fd.append("category", "Launch Countdown Procedure");
       fd.append("missionId", mission.id);
       fd.append("vehicleId", mission.vehicleId);
       return uploadDocument(fd);

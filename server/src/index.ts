@@ -6,6 +6,7 @@ import helmet from "helmet";
 import { env } from "./config/env";
 import { requireAuth } from "./middleware/auth";
 import { initWebsocket } from "./websocket";
+import { startHoldScheduler } from "./services/holdScheduler";
 
 import authRoutes from "./routes/auth";
 import userRoutes from "./routes/users";
@@ -62,3 +63,8 @@ httpServer.listen(env.port, () => {
   // eslint-disable-next-line no-console
   console.log(`AAT LOD API listening on port ${env.port} (${env.nodeEnv})`);
 });
+
+// v4.1 Item 1 - server-side hold scheduler, the sole source of truth for
+// programmed-hold triggering and Item 2's Auto-Proceed release, running
+// independent of any connected client (see services/holdScheduler.ts).
+startHoldScheduler();

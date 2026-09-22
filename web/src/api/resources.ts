@@ -93,12 +93,12 @@ export const reviseLot = (missionId: string, lot: string, reason: string) =>
 export const addProgrammedHold = (missionId: string, data: { holdMarkSeconds: number; estimatedDurationSeconds: number; reason?: string }) =>
   api.post(`/missions/${missionId}/countdown/holds`, data).then((r) => r.data);
 export const removeHold = (missionId: string, holdId: string) => api.delete(`/missions/${missionId}/countdown/holds/${holdId}`);
-export const triggerHold = (missionId: string, holdId: string) =>
-  api.post(`/missions/${missionId}/countdown/holds/${holdId}/trigger`).then((r) => r.data);
 export const callHold = (missionId: string, reason: string) =>
   api.post(`/missions/${missionId}/countdown/holds/call`, { reason }).then((r) => r.data);
 export const releaseHold = (missionId: string, holdId: string) =>
   api.post(`/missions/${missionId}/countdown/holds/${holdId}/release`);
+export const setHoldAutoProceed = (missionId: string, holdId: string, autoProceed: boolean) =>
+  api.patch(`/missions/${missionId}/countdown/holds/${holdId}/auto-proceed`, { autoProceed }).then((r) => r.data);
 export const pauseCountdown = (missionId: string, reason: string) =>
   api.post(`/missions/${missionId}/countdown/pause`, { reason }).then((r) => r.data);
 export const recycleCountdown = (missionId: string, toMarkSeconds: number, reason: string) =>
