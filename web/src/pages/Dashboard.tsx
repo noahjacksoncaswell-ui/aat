@@ -121,7 +121,8 @@ export default function Dashboard() {
           </div>
           {data?.fleetStatus?.nextMissionVehicle && (
             <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-              Next mission vehicle: <span className="font-medium text-slate-700 dark:text-slate-200">{data.fleetStatus.nextMissionVehicle}</span>
+              Vehicle assigned to next mission ({data.fleetStatus.nextMissionDesignator}):{" "}
+              <span className="font-medium text-slate-700 dark:text-slate-200">{data.fleetStatus.nextMissionVehicle}</span>
             </div>
           )}
           <Link to="/vehicles" className="mt-2 inline-block text-xs font-semibold text-aat-accent hover:underline">
@@ -130,9 +131,13 @@ export default function Dashboard() {
         </div>
 
         <div className="card p-5">
-          <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">LWCC Status Snapshot</div>
+          <div className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">LWCC Status Snapshot</div>
           {data?.lwccSnapshot ? (
             <>
+              <div className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+                {data.lwccSnapshot.missionName} ({data.lwccSnapshot.designator}) · {data.lwccSnapshot.siteName} (
+                {data.lwccSnapshot.siteLat.toFixed(4)}, {data.lwccSnapshot.siteLon.toFixed(4)})
+              </div>
               <StatusPill tone={data.lwccSnapshot.status === "VIOLATION" ? "nogo" : data.lwccSnapshot.status === "UNKNOWN" ? "neutral" : "go"}>
                 {data.lwccSnapshot.status.replace("_", " ")}
               </StatusPill>
@@ -225,7 +230,37 @@ export default function Dashboard() {
               <div key={doc.id} className="flex items-center justify-between py-2 text-sm">
                 <div>
                   <div className="font-medium">{doc.title}</div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">{doc.category}</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    {doc.category}
+                    {doc.mission && (
+                      <>
+                        {" "}
+                        · Mission:{" "}
+                        <Link to={`/missions/${doc.mission.id}`} className="text-aat-accent hover:underline">
+                          {doc.mission.designator}
+                        </Link>
+                      </>
+                    )}
+                    {doc.site && (
+                      <>
+                        {" "}
+                        · Site:{" "}
+                        <Link to={`/sites/${doc.site.id}`} className="text-aat-accent hover:underline">
+                          {doc.site.designator}
+                        </Link>
+                      </>
+                    )}
+                    {doc.vehicle && (
+                      <>
+                        {" "}
+                        · Vehicle:{" "}
+                        <Link to={`/vehicles/${doc.vehicle.id}`} className="text-aat-accent hover:underline">
+                          {doc.vehicle.name}
+                        </Link>
+                      </>
+                    )}
+                    {!doc.mission && !doc.site && !doc.vehicle && " · Not associated with a mission, site, or vehicle"}
+                  </div>
                 </div>
                 <div className="text-right text-xs text-slate-500 dark:text-slate-400">
                   <div>{doc.uploadedBy?.name}</div>

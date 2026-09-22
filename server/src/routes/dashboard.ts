@@ -60,6 +60,12 @@ router.get("/", async (_req, res) => {
     });
     lwccSnapshot = {
       missionId: next.mission.id,
+      missionName: next.mission.name,
+      designator: next.mission.designator,
+      siteName: next.mission.site.name,
+      siteDesignator: next.mission.site.designator,
+      siteLat: next.mission.site.lat,
+      siteLon: next.mission.site.lon,
       status: lwccCheck.status,
       activeViolations: lwccCheck.violating.map((r) => ({ no: r.no, description: r.description })),
     };
@@ -105,7 +111,12 @@ router.get("/", async (_req, res) => {
   const recentDocuments = await prisma.document.findMany({
     orderBy: { updatedAt: "desc" },
     take: 10,
-    include: { uploadedBy: { select: { id: true, name: true } } },
+    include: {
+      uploadedBy: { select: { id: true, name: true } },
+      mission: { select: { id: true, name: true, designator: true } },
+      site: { select: { id: true, name: true, designator: true } },
+      vehicle: { select: { id: true, name: true } },
+    },
   });
 
   // Fleet status summary (Section 5)
@@ -115,6 +126,7 @@ router.get("/", async (_req, res) => {
     inDevelopment: vehicles.filter((v) => v.status === "IN_DEVELOPMENT").length,
     retired: vehicles.filter((v) => v.status === "RETIRED").length,
     nextMissionVehicle: next ? next.mission.vehicle.name : null,
+    nextMissionDesignator: next ? next.mission.designator : null,
   };
 
   // Mission pipeline - every non-terminal mission, not just the single "next" one
