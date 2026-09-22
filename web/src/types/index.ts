@@ -334,14 +334,19 @@ export interface Coa {
   id: string;
   siteId: string;
   coaNumber: string;
+  issuedTo: string;
   issuingFacility: string;
+  authorizedOperationRadiusNm: number;
+  fixRadialDistance: string;
   effectiveDate: string;
   expirationDate: string;
-  authorizedActivity?: string | null;
-  altitudeLimits?: string | null;
-  conditions?: string | null;
+  dailyWindowOpen: string;
+  dailyWindowClose: string;
+  authorizedActivity: string;
+  altitudeLimits: string;
+  conditions: string;
   status: CoaComputedStatus;
-  site?: { id: string; name: string; designator: string };
+  site?: { id: string; name: string; designator: string; lat?: number; lon?: number };
 }
 
 // --- LWCC (Section 7) ---
@@ -427,6 +432,7 @@ export const DOCUMENT_CATEGORIES = [
   "Launch/Flight Readiness Review (LRR/FRR)",
   "Environmental/Permitting",
   "Landowner Authorization",
+  "Cert. of Waiver or Authorization",
   "Vehicle Certification & Test Data",
   "FAA Correspondence / COA / NOTAM",
   "Weather Waiver Request",

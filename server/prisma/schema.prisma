@@ -580,19 +580,28 @@ model MissionLogEntry {
 // FAA coordination
 // ---------------------------------------------------------------------------
 
+// Revision Directive v4.0 Section 2.1 - every field on the COA creation
+// form is required; the individual (issuedTo) is tracked in addition to
+// AAT as the organizational holder, and the FRD/radius/daily-window fields
+// are new.
 model COA {
-  id                 String   @id @default(uuid())
-  siteId             String
-  site               Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  coaNumber          String
-  issuingFacility    String
-  effectiveDate      DateTime
-  expirationDate     DateTime
-  authorizedActivity String?
-  altitudeLimits     String?
-  conditions         String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                          String   @id @default(uuid())
+  siteId                      String
+  site                        Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  coaNumber                   String
+  issuedTo                    String // individual responsible for the COA, in addition to AAT as holder
+  issuingFacility             String // Issuing FAA Office/Region/Facility
+  authorizedOperationRadiusNm Float // nautical miles - drives the map radius overlay (v4.0 Section 3.2)
+  fixRadialDistance           String // FRD notation, e.g. SCB025055.4
+  effectiveDate               DateTime
+  expirationDate              DateTime
+  dailyWindowOpen             String // daily operational window open, "HH:MM"
+  dailyWindowClose            String // daily operational window close, "HH:MM"
+  authorizedActivity          String
+  altitudeLimits              String
+  conditions                  String // Standard and Special Provisions
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
 
   @@index([siteId])
 }
