@@ -5,6 +5,7 @@ import {
   createMilestoneTemplate,
   createVehicle,
   deleteMilestoneTemplate,
+  deleteVehicle,
   fetchVehicle,
   fetchVehicles,
   updateVehicle,
@@ -379,6 +380,7 @@ function VehicleDetail({ vehicleId, onClose }: { vehicleId: string; onClose: () 
   const [editing, setEditing] = useState(false);
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docTitle, setDocTitle] = useState("");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const uploadDoc = useMutation({
     mutationFn: () => {
@@ -396,7 +398,17 @@ function VehicleDetail({ vehicleId, onClose }: { vehicleId: string; onClose: () 
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteVehicle(vehicleId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["vehicles"] });
+      onClose();
+    },
+  });
+
   if (!vehicle) return <div className="p-8 text-slate-400">Loading vehicle...</div>;
+
+  const missionCount = vehicle.missions?.length ?? 0;
 
   const photos = vehicle.documents?.filter((d) => d.category === "Vehicle Certification & Test Data" && d.versions?.[0]?.mimeType?.startsWith("image/")) ?? [];
   const otherDocs = vehicle.documents?.filter((d) => !photos.includes(d)) ?? [];
@@ -421,9 +433,46 @@ function VehicleDetail({ vehicleId, onClose }: { vehicleId: string; onClose: () 
             <button onClick={() => setEditing((e) => !e)} className="btn-secondary">
               {editing ? "Done editing" : "Edit"}
             </button>
+            <button onClick={() => setShowDeleteConfirm(true)} className="btn-danger">
+              Delete Vehicle
+            </button>
           </RequireRole>
         </div>
       </header>
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
+            <h2 className="mb-1 text-lg font-bold text-aat-nogo">Delete Vehicle</h2>
+            <p className="mb-3 text-sm text-slate-300">
+              This permanently deletes <strong>{vehicle.name}</strong> and its VLCP Milestone Template(s) as a unit. This cannot be undone.
+            </p>
+            {missionCount > 0 ? (
+              <p className="mb-3 rounded-md border border-aat-caution/60 bg-aat-caution/10 p-3 text-xs text-slate-200">
+                This vehicle is associated with {missionCount} mission{missionCount === 1 ? "" : "s"}. Deleting it is blocked while those
+                missions still reference it — resolve or remove the referencing mission(s) first.
+              </p>
+            ) : (
+              <p className="mb-3 text-xs text-slate-400">No missions currently reference this vehicle.</p>
+            )}
+            {deleteMutation.isError && (
+              <p className="mb-3 text-xs text-aat-nogo">{(deleteMutation.error as any)?.response?.data?.error ?? "Deletion failed"}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowDeleteConfirm(false)} className="btn-secondary">
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteMutation.mutate()}
+                disabled={missionCount > 0 || deleteMutation.isPending}
+                className="btn-danger disabled:opacity-50"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editing ? (
         <VehicleEditForm vehicle={vehicle} onDone={() => setEditing(false)} />

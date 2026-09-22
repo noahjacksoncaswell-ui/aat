@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { Role, VehicleStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma";
-import { requireAdmin, requireRole } from "../middleware/auth";
+import { requireRole } from "../middleware/auth";
 import { recordAudit } from "../services/audit";
 
 const router = Router();
@@ -111,7 +111,29 @@ router.patch("/:id", requireVehicleEditor, async (req, res) => {
   res.json(vehicle);
 });
 
-router.delete("/:id", requireAdmin, async (req, res) => {
+// Revision Directive v4.0 Section 4 - a vehicle and its VLCP Milestone
+// Template(s) are deleted together as a unit; the schema's onDelete: Cascade
+// from MilestoneTemplate -> Vehicle already handles that half automatically.
+// Mission.vehicleId is a required (non-nullable) reference, so silently
+// nulling it out on every mission that ever flew this vehicle isn't a safe
+// option without a much larger schema change - instead this blocks deletion
+// while any mission still references the vehicle and says exactly how many,
+// so the Launch Director must resolve those missions (e.g. via Remove
+// Mission, Section 1.2) before the vehicle itself can be removed. Never
+// silent either way.
+router.delete("/:id", requireVehicleEditor, async (req, res) => {
+  const vehicle = await prisma.vehicle.findUnique({
+    where: { id: req.params.id },
+    include: { missions: { select: { id: true } } },
+  });
+  if (!vehicle) return res.status(404).json({ error: "Vehicle not found" });
+  if (vehicle.missions.length > 0) {
+    return res.status(400).json({
+      error: `This vehicle is associated with ${vehicle.missions.length} mission(s) and cannot be deleted while those references exist. Remove or reassign the referencing missions first.`,
+      referencingMissionCount: vehicle.missions.length,
+    });
+  }
+
   await prisma.vehicle.delete({ where: { id: req.params.id } });
   await recordAudit({ userId: req.user!.id, action: "VEHICLE_DELETED", targetType: "Vehicle", targetId: req.params.id });
   res.status(204).send();
