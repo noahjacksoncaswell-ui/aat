@@ -53,11 +53,11 @@ export default function PersistentClockHeader({ mission }: { mission: Mission })
         </div>
         <div className="space-y-1">
           <ClockCell label="Test Clock" sublabel="Targeted Lift-Off Time (LOT)" value="MISSION CANCELLED" accent />
-          <TargetSubBox value="--" accent />
+          <TargetSubBox value="--" />
         </div>
         <div className="space-y-1">
           <ClockCell label="Launch Clock" sublabel="Projected liftoff" value="MISSION CANCELLED" accent />
-          <TargetSubBox value="--" accent />
+          <TargetSubBox value="--" />
         </div>
       </div>
     );
@@ -69,14 +69,27 @@ export default function PersistentClockHeader({ mission }: { mission: Mission })
 
   const activeHold = state?.activeHold ?? null;
   const unscheduledHoldActive = activeHold?.status === "ACTIVE" && activeHold.type === "UNSCHEDULED";
+  // v4.1 Item 4 - a PROGRAMMED hold whose estimated duration has elapsed
+  // without being released is in overage: its estimate can no longer be
+  // trusted, so from this point on the Launch Clock treats it exactly like
+  // an active unscheduled hold (continuous live push-back), just with its
+  // own distinct status text.
+  const programmedHoldOverage =
+    activeHold?.status === "ACTIVE" &&
+    activeHold.type === "PROGRAMMED" &&
+    !!activeHold.actualStartedAt &&
+    activeHold.estimatedDurationSeconds != null &&
+    (now.getTime() - new Date(activeHold.actualStartedAt).getTime()) / 1000 >= activeHold.estimatedDurationSeconds;
+  const openEndedHold = unscheduledHoldActive || programmedHoldOverage;
 
   // Between 8s polls, interpolate the server's projectedLiftoff forward by
-  // elapsed client time while an unscheduled hold is running so the target
-  // sub-box visibly pushes back second by second (v4.0 Section 7.5), rather
-  // than jumping only once per poll.
+  // elapsed client time while an unscheduled hold or a programmed-hold
+  // overage is running, so the target sub-box visibly pushes back second by
+  // second (v4.0 Section 7.5, v4.1 Section 4), rather than jumping only
+  // once per poll.
   const elapsedSinceFetchSeconds = (now.getTime() - fetchedAt.getTime()) / 1000;
   const projectedLiftoff =
-    state?.projectedLiftoff && unscheduledHoldActive
+    state?.projectedLiftoff && openEndedHold
       ? new Date(new Date(state.projectedLiftoff).getTime() + elapsedSinceFetchSeconds * 1000)
       : state?.projectedLiftoff
         ? new Date(state.projectedLiftoff)
@@ -87,11 +100,13 @@ export default function PersistentClockHeader({ mission }: { mission: Mission })
 
   let launchValue: string;
   if (!state?.lot) {
-    launchValue = "PENDING (LOT NOT ESTABLISHED)";
+    launchValue = "PENDING";
   } else if (liftoffComplete) {
     launchValue = "LIFTOFF CONFIRMED";
   } else if (unscheduledHoldActive) {
     launchValue = "UNSCHEDULED HOLD";
+  } else if (programmedHoldOverage) {
+    launchValue = "HOLD ELAPSED";
   } else {
     launchValue = launchCountdown!.text;
   }
@@ -117,7 +132,7 @@ export default function PersistentClockHeader({ mission }: { mission: Mission })
           }
           value={
             !state || state.tCountStatus === "PENDING"
-              ? "PENDING (LOT NOT ESTABLISHED)"
+              ? "PENDING"
               : state.tCountStatus === "COMPLETE" && state.liftoffActualTime
                 ? formatMet(state.liftoffActualTime, now)
                 : formatTMinus(tMinus)
@@ -125,14 +140,13 @@ export default function PersistentClockHeader({ mission }: { mission: Mission })
           accent
           holding={state?.tCountStatus === "HOLDING"}
         />
-        <TargetSubBox value={state?.lot ? formatTimestamp(state.lot, useZulu) : "--"} accent />
+        <TargetSubBox value={state?.lot ? formatTimestamp(state.lot, useZulu) : "--"} />
       </div>
 
       <div className="space-y-1">
-        <ClockCell label="Launch Clock" sublabel="Projected liftoff" value={launchValue} accent holding={unscheduledHoldActive} />
+        <ClockCell label="Launch Clock" sublabel="Projected liftoff" value={launchValue} accent holding={openEndedHold} />
         <TargetSubBox
           value={liftoffComplete ? formatTimestamp(state!.liftoffActualTime, useZulu) : projectedLiftoff ? formatTimestamp(projectedLiftoff, useZulu) : "--"}
-          accent
         />
       </div>
     </div>
@@ -149,14 +163,12 @@ function ClockCell({ label, sublabel, value, accent, holding }: { label: string;
   );
 }
 
-function TargetSubBox({ value, accent }: { value: string; accent?: boolean }) {
+// v4.1 Item 3 - all three target-date sub-boxes always use this same
+// light-gray-outline, dark-gray-interior styling (matching the Window
+// Clock main box), never the orange/yellow accent - that is reserved for
+// exactly the Test Clock and Launch Clock main boxes above, and only those.
+function TargetSubBox({ value }: { value: string }) {
   return (
-    <div
-      className={`flex h-6 items-center justify-center bg-aat-navy/60 px-2 text-[10px] font-mono text-slate-300 ${
-        accent ? "border border-aat-caution/60" : "border border-transparent"
-      }`}
-    >
-      {value}
-    </div>
+    <div className="flex h-7 items-center justify-center border border-zinc-800 bg-zinc-900 px-2 text-[14px] font-mono text-slate-300">{value}</div>
   );
 }
