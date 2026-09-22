@@ -3,6 +3,7 @@ import { env } from "../config/env";
 
 export interface WeatherSnapshot {
   source: "NWS" | "OpenWeatherMap" | "UNAVAILABLE";
+  stationId?: string;
   fetchedAt: string;
   temperatureC?: number;
   windSpeedKts?: number;
@@ -34,11 +35,13 @@ async function fetchFromNWS(lat: number, lon: number): Promise<WeatherSnapshot> 
   const forecastUrl = points.properties?.forecastHourly;
 
   let latest: any = null;
+  let stationId: string | undefined;
   if (stationsUrl) {
     const stationsRes = await fetch(stationsUrl, { headers: { "User-Agent": env.nwsUserAgent } });
     if (stationsRes.ok) {
       const stations = (await stationsRes.json()) as any;
       const firstStation = stations.features?.[0]?.id;
+      stationId = stations.features?.[0]?.properties?.stationIdentifier ?? firstStation?.split("/").pop();
       if (firstStation) {
         const obsRes = await fetch(`${firstStation}/observations/latest`, {
           headers: { "User-Agent": env.nwsUserAgent },
@@ -63,6 +66,7 @@ async function fetchFromNWS(lat: number, lon: number): Promise<WeatherSnapshot> 
   const props = latest?.properties;
   return {
     source: "NWS",
+    stationId,
     fetchedAt: new Date().toISOString(),
     temperatureC: props?.temperature?.value ?? undefined,
     windSpeedKts: props?.windSpeed?.value != null ? props.windSpeed.value * 0.539957 : undefined, // km/h -> kts

@@ -61,6 +61,8 @@ export const postponeMission = (missionId: string, notes: string) =>
   api.post(`/missions/${missionId}/actions/postpone`, { notes });
 export const cancelMission = (missionId: string, notes: string, confirmDesignator: string) =>
   api.post(`/missions/${missionId}/actions/cancel`, { notes, confirmDesignator });
+export const removeMission = (missionId: string, confirmDesignator: string) =>
+  api.delete(`/missions/${missionId}/actions/remove`, { data: { confirmDesignator, attested: true } });
 export const scrubMission = (missionId: string, notes: string) =>
   api.post(`/missions/${missionId}/actions/scrub`, { notes }).then((r) => r.data);
 export const logDisposition = (missionId: string, data: Record<string, unknown>) =>

@@ -8,6 +8,7 @@ import { recordAudit } from "../services/audit";
 import { isSameUtcDate, isTodayOrPast, STANDARD_GO_NO_GO_STATIONS, FAA_STATION_NAME } from "../services/missionWorkflow";
 import { REQUIRED_NOTIFICATION_TYPES } from "../services/faa";
 import { broadcastMissionUpdate } from "../websocket";
+import { storage } from "../services/storage";
 
 const router = Router();
 const requireConsole = requireRole(Role.ADMIN, Role.LAUNCH_DIRECTOR, Role.OPERATOR);
@@ -330,6 +331,58 @@ router.post("/:id/actions/cancel", requireLaunchDirector, async (req, res) => {
 
   await recordAudit({ userId: req.user!.id, action: "MISSION_CANCELLED", targetType: "Mission", targetId: mission.id, metadata: { notes: parsed.data.notes } });
   broadcastMissionUpdate(mission.id);
+  res.status(204).send();
+});
+
+// Revision Directive v4.0 Section 1.2 - Remove Mission. Additive to, never a
+// substitute for, Cancel: only ever available once a mission is already
+// CANCELLED, and permanently, irrecoverably deletes the mission and every
+// record associated with it (the mission's own history goes with it, which
+// is why this is logged to the system-level audit log rather than a
+// MissionHistoryEvent). Double confirmation mirrors Cancel's pattern
+// (Section 3.3): a typed designator match plus an explicit attestation.
+const removeSchema = z.object({ confirmDesignator: z.string().min(1), attested: z.literal(true) });
+
+router.delete("/:id/actions/remove", requireLaunchDirector, async (req, res) => {
+  const parsed = removeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "A matching confirmation designator and the data-integrity attestation are both required" });
+  }
+
+  const mission = await prisma.mission.findUnique({ where: { id: req.params.id } });
+  if (!mission) return res.status(404).json({ error: "Mission not found" });
+  if (mission.status !== MissionStatus.CANCELLED) {
+    return res.status(400).json({ error: "Remove Mission is only available once a mission has been Cancelled" });
+  }
+  if (parsed.data.confirmDesignator.trim().toUpperCase() !== mission.designator.toUpperCase()) {
+    return res.status(400).json({ error: "Confirmation designator does not match this mission - removal not executed" });
+  }
+
+  // Document rows carry an optional missionId (documents may also be scoped
+  // to a site or vehicle instead), so unlike every other Mission-owned
+  // table there is no onDelete: Cascade on this relation - the documents
+  // tagged to this mission, and their underlying stored files, are removed
+  // explicitly here before the mission itself is deleted.
+  const documents = await prisma.document.findMany({ where: { missionId: mission.id }, include: { versions: true } });
+  for (const doc of documents) {
+    for (const v of doc.versions) {
+      await storage.deleteObject(v.storageKey);
+    }
+  }
+
+  const { name, designator } = mission;
+  await prisma.$transaction([
+    prisma.document.deleteMany({ where: { missionId: mission.id } }),
+    prisma.mission.delete({ where: { id: mission.id } }),
+  ]);
+
+  await recordAudit({
+    userId: req.user!.id,
+    action: "MISSION_REMOVED",
+    targetType: "Mission",
+    targetId: mission.id,
+    metadata: { designator, name },
+  });
   res.status(204).send();
 });
 

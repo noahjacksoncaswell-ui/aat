@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addDispositionAddendum,
@@ -14,6 +14,7 @@ import {
   logDisposition,
   postponeMission,
   removeLaunchPeriodEntry,
+  removeMission,
   scrubMission,
   targetLaunchOpportunity,
   updateGoNoGo,
@@ -35,6 +36,7 @@ const TABS = ["Overview", "Countdown", "Polls", "FAA & NOTAM", "Log", "History",
 
 export default function MissionDetail() {
   const { missionId } = useParams<{ missionId: string }>();
+  const navigate = useNavigate();
   const { useZulu } = usePreferences();
   const qc = useQueryClient();
   const [tab, setTab] = useState<(typeof TABS)[number]>("Overview");
@@ -57,6 +59,9 @@ export default function MissionDetail() {
   if (isLoading || !mission) return <div className="p-8 text-slate-400">Loading mission...</div>;
 
   const targeted = mission.launchPeriodEntries.find((e) => e.isTargeted);
+  const cancelled = mission.status === "CANCELLED";
+  const cancelledEvent = mission.historyEvents?.find((e: any) => e.eventType === "CANCELLED");
+  const cancelledAt = cancelledEvent?.timestamp;
 
   return (
     <div className="space-y-6 p-8">
@@ -91,13 +96,35 @@ export default function MissionDetail() {
         ))}
       </div>
 
-      {tab === "Overview" && <OverviewTab mission={mission} missionId={missionId!} useZulu={useZulu} onRequestScrub={() => setScrubModalOpen(true)} />}
-      {tab === "Countdown" && <CountdownTab mission={mission} onRequestScrub={() => setScrubModalOpen(true)} />}
-      {tab === "Polls" && <PollsTab mission={mission} missionId={missionId!} />}
-      {tab === "FAA & NOTAM" && <FaaTab missionId={missionId!} targeted={targeted} useZulu={useZulu} />}
-      {tab === "Log" && <LogTab mission={mission} missionId={missionId!} useZulu={useZulu} />}
-      {tab === "History" && <HistoryTab mission={mission} useZulu={useZulu} />}
-      {tab === "LWCC" && <LwccTab missionId={missionId!} />}
+      {tab === "Overview" &&
+        (cancelled ? (
+          <div className="space-y-6">
+            <LockdownNotice tabName="Overview" cancelledAt={cancelledAt} useZulu={useZulu} />
+            <section className="card max-w-md p-5">
+              <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Launch Director Actions</div>
+              <ActionButtons mission={mission} missionId={missionId!} onRequestScrub={() => setScrubModalOpen(true)} onRemoved={() => navigate("/missions")} />
+            </section>
+          </div>
+        ) : (
+          <OverviewTab mission={mission} missionId={missionId!} useZulu={useZulu} onRequestScrub={() => setScrubModalOpen(true)} />
+        ))}
+      {tab === "Countdown" &&
+        (cancelled ? (
+          <LockdownNotice tabName="Countdown" cancelledAt={cancelledAt} useZulu={useZulu} />
+        ) : (
+          <CountdownTab mission={mission} onRequestScrub={() => setScrubModalOpen(true)} />
+        ))}
+      {tab === "Polls" && (cancelled ? <LockdownNotice tabName="Polls" cancelledAt={cancelledAt} useZulu={useZulu} /> : <PollsTab mission={mission} missionId={missionId!} />)}
+      {tab === "FAA & NOTAM" &&
+        (cancelled ? (
+          <LockdownNotice tabName="FAA & NOTAM" cancelledAt={cancelledAt} useZulu={useZulu} />
+        ) : (
+          <FaaTab missionId={missionId!} targeted={targeted} useZulu={useZulu} />
+        ))}
+      {tab === "Log" && <LogTab mission={mission} missionId={missionId!} useZulu={useZulu} cancelledAt={cancelled ? cancelledAt : undefined} />}
+      {tab === "History" && <HistoryTab mission={mission} useZulu={useZulu} cancelledAt={cancelled ? cancelledAt : undefined} />}
+      {tab === "LWCC" &&
+        (cancelled ? <LockdownNotice tabName="LWCC" cancelledAt={cancelledAt} useZulu={useZulu} /> : <LwccTab missionId={missionId!} site={mission.site} />)}
 
       {scrubModalOpen && <ScrubModal missionId={missionId!} onClose={() => setScrubModalOpen(false)} />}
     </div>
@@ -105,15 +132,51 @@ export default function MissionDetail() {
 }
 
 // ---------------------------------------------------------------------------
-// Launch Director actions (Section 3)
+// Cancellation lockdown (Revision Directive v4.0 Section 1)
 // ---------------------------------------------------------------------------
 
-function ActionButtons({ mission, missionId, onRequestScrub }: { mission: any; missionId: string; onRequestScrub: () => void }) {
+function LockdownNotice({ tabName, cancelledAt, useZulu }: { tabName: string; cancelledAt?: string; useZulu: boolean }) {
+  return (
+    <div className="card border-aat-nogo/60 bg-aat-nogo/5 p-6 text-center">
+      <div className="text-sm font-bold uppercase tracking-wide text-aat-nogo">Mission Cancelled</div>
+      <p className="mt-2 text-sm text-slate-300">
+        This mission was CANCELLED {cancelledAt ? `on ${formatTimestamp(cancelledAt, useZulu)}` : ""}. The {tabName} services on this tab are
+        unavailable for a cancelled mission.
+      </p>
+    </div>
+  );
+}
+
+function ReadOnlyBanner({ cancelledAt, useZulu }: { cancelledAt?: string; useZulu: boolean }) {
+  return (
+    <div className="mb-3 border border-aat-nogo/60 bg-aat-nogo/5 px-3 py-2 text-xs text-slate-300">
+      This mission was CANCELLED {cancelledAt ? `on ${formatTimestamp(cancelledAt, useZulu)}` : ""}. This tab is retained for archival purposes
+      only and is read-only.
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Launch Director actions (Section 3; Remove Mission added by v4.0 Section 1.2)
+// ---------------------------------------------------------------------------
+
+function ActionButtons({
+  mission,
+  missionId,
+  onRequestScrub,
+  onRemoved,
+}: {
+  mission: any;
+  missionId: string;
+  onRequestScrub: () => void;
+  onRemoved?: () => void;
+}) {
   const { isLaunchDirector } = useAuth();
   const qc = useQueryClient();
-  const [modal, setModal] = useState<"postpone" | "cancel1" | "cancel2" | "disposition" | "target" | null>(null);
+  const [modal, setModal] = useState<"postpone" | "cancel1" | "cancel2" | "remove1" | "remove2" | "disposition" | "target" | null>(null);
   const [notes, setNotes] = useState("");
   const [confirmDesignator, setConfirmDesignator] = useState("");
+  const [attested, setAttested] = useState(false);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["mission", missionId] });
@@ -127,11 +190,19 @@ function ActionButtons({ mission, missionId, onRequestScrub }: { mission: any; m
     mutationFn: () => cancelMission(missionId, notes, confirmDesignator),
     onSuccess: () => (invalidate(), close()),
   });
+  const remove = useMutation({
+    mutationFn: () => removeMission(missionId, confirmDesignator),
+    onSuccess: () => {
+      close();
+      onRemoved?.();
+    },
+  });
 
   function close() {
     setModal(null);
     setNotes("");
     setConfirmDesignator("");
+    setAttested(false);
   }
 
   if (!isLaunchDirector) return null;
@@ -142,6 +213,7 @@ function ActionButtons({ mission, missionId, onRequestScrub }: { mission: any; m
   const canCancel = !["CANCELLED", "SUCCESSFUL"].includes(mission.status);
   const canScrub = mission.status === "TARGETED";
   const canDisposition = mission.status === "TARGETED";
+  const canRemove = mission.status === "CANCELLED";
 
   return (
     <div className="flex flex-wrap gap-2">
@@ -168,6 +240,11 @@ function ActionButtons({ mission, missionId, onRequestScrub }: { mission: any; m
       {canDisposition && (
         <button onClick={() => setModal("disposition")} className="btn-primary">
           Mark Successful / Log Disposition
+        </button>
+      )}
+      {canRemove && (
+        <button onClick={() => setModal("remove1")} className="btn-danger">
+          Remove Mission
         </button>
       )}
 
@@ -241,6 +318,68 @@ function ActionButtons({ mission, missionId, onRequestScrub }: { mission: any; m
               </button>
             </div>
             {cancel.isError && <p className="mt-2 text-xs text-aat-nogo">{(cancel.error as any)?.response?.data?.error}</p>}
+          </div>
+        </div>
+      )}
+
+      {modal === "remove1" && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-xl border border-zinc-800 bg-black p-6">
+            <h2 className="mb-1 text-lg font-bold text-aat-nogo">Remove Mission — Permanent Deletion</h2>
+            <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+              This permanently deletes mission <strong className="font-mono">{mission.designator}</strong> and every associated record
+              (launch period entries, milestones, holds, LWCC data, log entries, history events, disposition, and documents tagged to this
+              mission) from the system. It does not appear anywhere in the application afterward. This is separate from, and does not
+              undo, the Cancel action already recorded against this mission.
+            </p>
+            <label className="flex items-start gap-2 border border-zinc-700 p-3 text-left text-xs text-slate-300">
+              <input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} className="mt-0.5 shrink-0" />
+              <span>
+                By proceeding, I attest that this mission record is being permanently removed from the American Aerospace Technologies Corp
+                Launch Operations Division system solely for the purpose of correcting a data entry error or performing administrative
+                record cleanup, and not to conceal, alter, or misrepresent any launch activity, attempt, or outcome. I understand this
+                action is irreversible and will permanently delete this mission and all associated records from the system.
+              </span>
+            </label>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={close} className="btn-secondary">
+                Back
+              </button>
+              <button onClick={() => setModal("remove2")} disabled={!attested} className="btn-danger disabled:opacity-50">
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modal === "remove2" && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
+            <h2 className="mb-1 text-lg font-bold text-aat-nogo">Confirm Removal — Irreversible</h2>
+            <p className="mb-3 text-sm">
+              Type the mission designator <strong className="font-mono">{mission.designator}</strong> to confirm permanent deletion. This
+              cannot be undone.
+            </p>
+            <input
+              value={confirmDesignator}
+              onChange={(e) => setConfirmDesignator(e.target.value)}
+              placeholder={mission.designator}
+              className="input font-mono"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={close} className="btn-secondary">
+                Back
+              </button>
+              <button
+                onClick={() => remove.mutate()}
+                disabled={confirmDesignator.trim().toUpperCase() !== mission.designator.toUpperCase() || remove.isPending}
+                className="btn-danger disabled:opacity-50"
+              >
+                CONFIRM PERMANENT REMOVAL
+              </button>
+            </div>
+            {remove.isError && <p className="mt-2 text-xs text-aat-nogo">{(remove.error as any)?.response?.data?.error}</p>}
           </div>
         </div>
       )}
@@ -660,7 +799,7 @@ function OverviewTab({ mission, missionId, useZulu, onRequestScrub }: any) {
           <div className="space-y-1 text-xs">
             <div>LWCC: see LWCC tab</div>
             <div>FAA checklist: {openChecklist > 0 ? `${openChecklist} item(s) outstanding` : "satisfied / not yet applicable"}</div>
-            <div>T-COUNT: see clock header above</div>
+            <div>Test Clock: see clock header above</div>
           </div>
         </section>
         <section className="card p-5">
@@ -902,7 +1041,7 @@ function ChecklistItem({ missionId, item, isLaunchDirector, useZulu }: any) {
   );
 }
 
-function LogTab({ mission, missionId, useZulu }: any) {
+function LogTab({ mission, missionId, useZulu, cancelledAt }: any) {
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const mutation = useMutation({
@@ -912,25 +1051,29 @@ function LogTab({ mission, missionId, useZulu }: any) {
       qc.invalidateQueries({ queryKey: ["mission", missionId] });
     },
   });
+  const readOnly = !!cancelledAt || mission.status === "CANCELLED";
 
   return (
     <div className="card mx-auto max-w-3xl p-5">
+      {readOnly && <ReadOnlyBanner cancelledAt={cancelledAt} useZulu={useZulu} />}
       <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Mission Log</div>
-      <div className="flex gap-2">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && text.trim() && mutation.mutate()}
-          placeholder="Log entry..."
-          className="input"
-        />
-        <button
-          onClick={() => text.trim() && mutation.mutate()}
-          className="shrink-0 rounded-md bg-white px-4 py-2 text-sm font-semibold text-black"
-        >
-          Log
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="flex gap-2">
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && text.trim() && mutation.mutate()}
+            placeholder="Log entry..."
+            className="input"
+          />
+          <button
+            onClick={() => text.trim() && mutation.mutate()}
+            className="shrink-0 rounded-md bg-white px-4 py-2 text-sm font-semibold text-black"
+          >
+            Log
+          </button>
+        </div>
+      )}
       <div className="mt-4 space-y-2 font-mono text-xs">
         {mission.logEntries?.map((entry: any) => (
           <div key={entry.id} className="border-b border-slate-100 pb-2 dark:border-slate-800">
@@ -943,9 +1086,10 @@ function LogTab({ mission, missionId, useZulu }: any) {
   );
 }
 
-function HistoryTab({ mission, useZulu }: any) {
+function HistoryTab({ mission, useZulu, cancelledAt }: any) {
   return (
     <div className="card mx-auto max-w-3xl p-5">
+      {(cancelledAt || mission.status === "CANCELLED") && <ReadOnlyBanner cancelledAt={cancelledAt} useZulu={useZulu} />}
       <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
         Mission History (append-only compliance record)
       </div>

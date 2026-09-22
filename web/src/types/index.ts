@@ -56,6 +56,7 @@ export interface SitePhoto {
 
 export interface WeatherSnapshot {
   source: "NWS" | "OpenWeatherMap" | "UNAVAILABLE";
+  stationId?: string;
   fetchedAt: string;
   temperatureC?: number;
   windSpeedKts?: number;

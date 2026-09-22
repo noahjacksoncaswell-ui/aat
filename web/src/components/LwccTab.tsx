@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { clearLwccLog, clearLwccOverride, fetchLwccState, overrideLwcc, submitLwccReport } from "../api/resources";
+import { clearLwccLog, clearLwccOverride, fetchLwccState, fetchSiteWeather, overrideLwcc, submitLwccReport } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
 import { usePreferences } from "../context/PreferencesContext";
 import { formatTimestamp } from "../utils/time";
@@ -20,6 +20,15 @@ function rowTone(status: LwccRowStatus) {
   }
 }
 
+function ContextField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="font-mono text-slate-200">{value}</div>
+    </div>
+  );
+}
+
 function riskLabel(risk: string) {
   if (risk === "MANUAL") return "MANUAL";
   if (risk === "ACTIVE") return "ACTIVE";
@@ -27,7 +36,7 @@ function riskLabel(risk: string) {
   return risk;
 }
 
-export default function LwccTab({ missionId }: { missionId: string }) {
+export default function LwccTab({ missionId, site }: { missionId: string; site: { id: string; name: string; lat: number; lon: number } }) {
   const { useZulu } = usePreferences();
   const { isLaunchDirector } = useAuth();
   const qc = useQueryClient();
@@ -35,6 +44,15 @@ export default function LwccTab({ missionId }: { missionId: string }) {
     queryKey: ["lwcc", missionId],
     queryFn: () => fetchLwccState(missionId),
     refetchInterval: 30_000,
+  });
+  const {
+    data: weather,
+    refetch: refetchWeather,
+    isFetching: weatherRefreshing,
+  } = useQuery({
+    queryKey: ["site-weather", site.id],
+    queryFn: () => fetchSiteWeather(site.id),
+    refetchInterval: 5 * 60_000,
   });
   const [reportRow, setReportRow] = useState<LwccRow | null>(null);
   const [overrideRow, setOverrideRow] = useState<LwccRow | null>(null);
@@ -79,6 +97,31 @@ export default function LwccTab({ missionId }: { missionId: string }) {
         )}
       </section>
 
+      <section className="card flex flex-wrap items-center justify-between gap-4 p-4 text-xs">
+        <div className="flex flex-wrap gap-x-6 gap-y-1">
+          <ContextField label="Launch Site" value={site.name} />
+          <ContextField label="Coordinates" value={`${site.lat.toFixed(4)}, ${site.lon.toFixed(4)}`} />
+          <ContextField
+            label="Weather Data Source"
+            value={
+              !weather || weather.source === "UNAVAILABLE"
+                ? "Unavailable"
+                : weather.stationId
+                  ? `${weather.source} · Station ${weather.stationId}`
+                  : weather.source
+            }
+          />
+          <ContextField label="Last Data Update" value={weather ? formatTimestamp(weather.fetchedAt, useZulu) : "--"} />
+        </div>
+        <button
+          onClick={() => refetchWeather()}
+          disabled={weatherRefreshing}
+          className="shrink-0 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+        >
+          {weatherRefreshing ? "Refreshing..." : "Refresh"}
+        </button>
+      </section>
+
       <section className="card overflow-hidden">
         <table className="w-full text-xs">
           <thead className="border-b border-slate-200 bg-slate-50 text-left uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-400">
@@ -86,10 +129,10 @@ export default function LwccTab({ missionId }: { missionId: string }) {
               <th className="px-3 py-2">LWCC No.</th>
               <th className="px-3 py-2">Description</th>
               <th className="px-3 py-2">Limit / Requirement</th>
+              <th className="px-3 py-2 text-aat-caution">Report</th>
               <th className="px-3 py-2">Current</th>
-              <th className="px-3 py-2">T-15 Min</th>
-              <th className="px-3 py-2">Risk (15m)</th>
-              <th className="px-3 py-2">Risk (30m)</th>
+              <th className="px-3 py-2">Violation Risk (15 Min)</th>
+              <th className="px-3 py-2">Violation Risk (30 Min)</th>
               <th className="px-3 py-2" />
             </tr>
           </thead>
@@ -99,24 +142,26 @@ export default function LwccTab({ missionId }: { missionId: string }) {
                 <td className="px-3 py-2 font-mono">LWCCR {row.no}</td>
                 <td className="px-3 py-2">{row.description}</td>
                 <td className="px-3 py-2 max-w-xs text-slate-500 dark:text-slate-400">{row.limitText}</td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 text-aat-caution">
                   {row.mode === "LIVE" ? (
-                    row.currentValue != null ? row.currentValue.toFixed(1) : "--"
-                  ) : row.status === "NOT_REPORTED" ? (
-                    isLaunchDirector || true ? (
-                      <button onClick={() => setReportRow(row)} className="text-aat-accent hover:underline">
-                        REPORT
-                      </button>
-                    ) : (
-                      "--"
-                    )
+                    "--"
                   ) : (
-                    <button onClick={() => setReportRow(row)} className="text-aat-accent hover:underline">
-                      {row.lastReport?.data?.violation ? "VIOLATES" : "CLEAR"} (update)
+                    <button onClick={() => setReportRow(row)} className="font-semibold text-aat-caution hover:underline">
+                      {row.status === "NOT_REPORTED" ? "REPORT" : "UPDATE"}
                     </button>
                   )}
                 </td>
-                <td className="px-3 py-2">{row.valueAt15Min != null ? row.valueAt15Min.toFixed(1) : "--"}</td>
+                <td className="px-3 py-2">
+                  {row.mode === "LIVE"
+                    ? row.currentValue != null
+                      ? row.currentValue.toFixed(1)
+                      : "--"
+                    : row.status === "NOT_REPORTED"
+                      ? "NOT REPORTED"
+                      : row.lastReport?.data?.violation
+                        ? "VIOLATES"
+                        : "CLEAR"}
+                </td>
                 <td className="px-3 py-2">{riskLabel(row.risk15)}</td>
                 <td className="px-3 py-2">{riskLabel(row.risk30)}</td>
                 <td className="px-3 py-2 text-right">
