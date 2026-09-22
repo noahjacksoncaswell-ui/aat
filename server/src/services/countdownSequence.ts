@@ -27,7 +27,7 @@ export const COUNTDOWN_MILESTONE_SEQUENCE: CountdownSequenceItem[] = [
   { phase: "COUNTDOWN", label: "Call to stations", responsibleStation: "Launch Director", tMinusSeconds: 2400, sortOrder: 6 },
   { phase: "COUNTDOWN", label: "Pre-operation verification", responsibleStation: "All Stations", tMinusSeconds: 2100, sortOrder: 7 },
   { phase: "COUNTDOWN", label: "LOT verification", responsibleStation: "Launch Director", tMinusSeconds: 1920, sortOrder: 8 },
-  { phase: "COUNTDOWN", label: "T-COUNT initialization", responsibleStation: "Launch Director", tMinusSeconds: 1800, sortOrder: 9 },
+  { phase: "COUNTDOWN", label: "Test Clock initialization", responsibleStation: "Launch Director", tMinusSeconds: 1800, sortOrder: 9 },
   { phase: "COUNTDOWN", label: "TRACON/ARTCC notification (operating window open)", responsibleStation: "Communications", tMinusSeconds: 1680, sortOrder: 10 },
   { phase: "COUNTDOWN", label: "Vehicle/motor integration", responsibleStation: "Propulsion", tMinusSeconds: 1500, sortOrder: 11 },
   { phase: "COUNTDOWN", label: "Vehicle launch configuration", responsibleStation: "Pad", tMinusSeconds: 1200, sortOrder: 12 },

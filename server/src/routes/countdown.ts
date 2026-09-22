@@ -24,7 +24,7 @@ async function loadMissionWithHolds(mId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// State snapshot - the frontend ticks T-COUNT/P-COUNT locally from this.
+// State snapshot - the frontend ticks Test Clock/Launch Clock locally from this.
 // ---------------------------------------------------------------------------
 
 router.get("/state", async (req, res) => {
@@ -170,12 +170,12 @@ router.post("/holds", requireLaunchDirector, async (req, res) => {
 
   const mission = await loadMissionWithHolds(missionId(req));
   if (!mission) return res.status(404).json({ error: "Mission not found" });
-  if (!mission.lot) return res.status(400).json({ error: "T-COUNT is not established" });
+  if (!mission.lot) return res.status(400).json({ error: "Test Clock is not established" });
 
   const activeHold = mission.holds.find((h) => h.status === "ACTIVE") ?? null;
   const currentTMinus = computeTCountSeconds(mission, activeHold);
   if (currentTMinus != null && parsed.data.holdMarkSeconds >= currentTMinus) {
-    return res.status(400).json({ error: "Hold mark has already been reached by T-COUNT" });
+    return res.status(400).json({ error: "Hold mark has already been reached by the Test Clock" });
   }
 
   const hold = await prisma.missionHold.create({
@@ -201,7 +201,7 @@ router.delete("/holds/:holdId", requireLaunchDirector, async (req, res) => {
   res.status(204).send();
 });
 
-// Client-driven trigger: fired once the locally-ticking T-COUNT crosses a
+// Client-driven trigger: fired once the locally-ticking Test Clock crosses a
 // SCHEDULED hold's mark. Re-validated server-side before activating.
 router.post("/holds/:holdId/trigger", requireConsole, async (req, res) => {
   const mId = missionId(req);
@@ -237,9 +237,9 @@ type CallHoldResult =
 async function callHold(mId: string, userId: string, reason: string): Promise<CallHoldResult> {
   const mission = await loadMissionWithHolds(mId);
   if (!mission) return { ok: false, status: 404, message: "Mission not found" };
-  if (!mission.lot) return { ok: false, status: 400, message: "T-COUNT is not established" };
+  if (!mission.lot) return { ok: false, status: 400, message: "Test Clock is not established" };
   if (mission.holds.some((h) => h.status === "ACTIVE")) return { ok: false, status: 400, message: "A hold is already active" };
-  if (mission.tCountStatus !== "COUNTING") return { ok: false, status: 400, message: "T-COUNT is not currently counting" };
+  if (mission.tCountStatus !== "COUNTING") return { ok: false, status: 400, message: "Test Clock is not currently counting" };
 
   const currentTMinus = computeTCountSeconds(mission, null) ?? 0;
 
@@ -333,11 +333,11 @@ router.post("/recycle", requireLaunchDirector, async (req, res) => {
   const mission = await loadMissionWithHolds(mId);
   if (!mission) return res.status(404).json({ error: "Mission not found" });
   if (mission.tCountStatus !== "COUNTING") {
-    return res.status(400).json({ error: "T-COUNT must be actively counting to recycle (release any active hold first)" });
+    return res.status(400).json({ error: "Test Clock must be actively counting to recycle (release any active hold first)" });
   }
 
   const currentTMinus = computeTCountSeconds(mission, null);
-  if (currentTMinus == null) return res.status(400).json({ error: "T-COUNT is not established" });
+  if (currentTMinus == null) return res.status(400).json({ error: "Test Clock is not established" });
   if (parsed.data.toMarkSeconds <= currentTMinus) {
     return res.status(400).json({ error: "Recycle target must be earlier in the count (a larger T-minus value) than the current mark" });
   }
@@ -373,7 +373,7 @@ router.post("/liftoff", requireLaunchDirector, async (req, res) => {
   const mId = missionId(req);
   const mission = await prisma.mission.findUnique({ where: { id: mId } });
   if (!mission) return res.status(404).json({ error: "Mission not found" });
-  if (!mission.lot) return res.status(400).json({ error: "T-COUNT is not established" });
+  if (!mission.lot) return res.status(400).json({ error: "Test Clock is not established" });
 
   const liftoffActualTime = parsed.data.timestamp ? new Date(parsed.data.timestamp) : new Date();
 

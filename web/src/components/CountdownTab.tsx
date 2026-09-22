@@ -316,11 +316,19 @@ function TimeControls({ mission, state, onRequestScrub }: { mission: Mission; st
     <section className="card p-5">
       <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Time Control Actions</div>
       <div className="flex flex-wrap gap-2">
-        <button onClick={() => liftoffMutation.mutate()} disabled={state.tCountStatus === "COMPLETE"} className="btn-primary disabled:opacity-50">
+        <button
+          onClick={() => {
+            if (window.confirm("Establish the actual launch time now? This marks liftoff and cannot be undone from this action.")) {
+              liftoffMutation.mutate();
+            }
+          }}
+          disabled={state.tCountStatus === "COMPLETE"}
+          className="btn-primary disabled:opacity-50"
+        >
           Establish Actual Launch Time (Mark Liftoff)
         </button>
         <button onClick={() => setShowRevise(true)} className="btn-secondary">
-          Select New Time Within Window
+          Select New LOT
         </button>
         <button onClick={() => setShowRecycle(true)} disabled={state.tCountStatus !== "COUNTING"} className="btn-secondary disabled:opacity-50">
           Recycle to Mark
@@ -333,7 +341,7 @@ function TimeControls({ mission, state, onRequestScrub }: { mission: Mission; st
       {showRevise && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
-            <h2 className="mb-3 text-lg font-bold">Select New Time Within Window</h2>
+            <h2 className="mb-3 text-lg font-bold">Select New LOT</h2>
             <input type="datetime-local" value={reviseForm.lot} onChange={(e) => setReviseForm({ ...reviseForm, lot: e.target.value })} className="input mb-2" />
             <textarea value={reviseForm.reason} onChange={(e) => setReviseForm({ ...reviseForm, reason: e.target.value })} placeholder="Reason (required)" className="input" rows={2} />
             <div className="mt-4 flex justify-end gap-2">

@@ -24,18 +24,32 @@ export function computeTCountSeconds(mission: Mission, activeHold: MissionHold |
 }
 
 /**
- * P-COUNT (Section 6.2.1): confirmed LOT + realized duration of every
- * released hold + estimated duration of every scheduled/active
- * (not-yet-released) hold. Non-freezing - recalculates on every read.
+ * Launch Clock (formerly P-COUNT; Section 6.2.1, renamed/reworked by
+ * Revision Directive v4.0 Section 7): confirmed LOT + realized duration of
+ * every released hold + estimated duration of every scheduled (not yet
+ * reached) or active *programmed* hold. Non-freezing - recalculates on
+ * every read.
+ *
+ * An ACTIVE *unscheduled* hold has no pre-known duration (v4.0 Section
+ * 7.5), so it cannot be folded in as a fixed estimate the way a programmed
+ * hold is: instead its contribution is the real elapsed time since it
+ * started, which grows continuously for as long as it remains active and
+ * is superseded by its actualDurationSeconds the instant it is released.
  */
-export function computeProjectedLiftoff(mission: Mission, holds: MissionHold[]): Date | null {
+export function computeProjectedLiftoff(mission: Mission, holds: MissionHold[], now: Date = new Date()): Date | null {
   if (!mission.lot) return null;
   let offsetSeconds = 0;
   for (const hold of holds) {
     if (hold.status === "RELEASED") {
       offsetSeconds += hold.actualDurationSeconds ?? 0;
-    } else if (hold.status === "SCHEDULED" || hold.status === "ACTIVE" || hold.status === "DURATION_ELAPSED") {
+    } else if (hold.status === "SCHEDULED" || hold.status === "DURATION_ELAPSED") {
       offsetSeconds += hold.estimatedDurationSeconds ?? 0;
+    } else if (hold.status === "ACTIVE") {
+      if (hold.type === "UNSCHEDULED" && hold.actualStartedAt) {
+        offsetSeconds += (now.getTime() - hold.actualStartedAt.getTime()) / 1000;
+      } else {
+        offsetSeconds += hold.estimatedDurationSeconds ?? 0;
+      }
     }
   }
   return new Date(mission.lot.getTime() + offsetSeconds * 1000);
