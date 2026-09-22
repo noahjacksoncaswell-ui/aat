@@ -9,6 +9,7 @@ import { RequireRole } from "../components/RequireRole";
 import { DocumentLink } from "../components/DocumentLink";
 import { NOTIFICATION_TYPE_LABELS } from "../constants";
 import type { Coa } from "../types";
+import { COA_DOCUMENT_CATEGORY } from "../types";
 
 export default function Faa() {
   const { useZulu } = usePreferences();
@@ -320,7 +321,7 @@ function CoaDetailModal({ coa, onClose, onDone, onDeleted }: { coa: Coa; onClose
 
   const { data: coaDocs } = useQuery({
     queryKey: ["coa-documents", coa.siteId],
-    queryFn: () => fetchDocuments({ siteId: coa.siteId, category: "Cert. of Waiver or Authorization" }),
+    queryFn: () => fetchDocuments({ siteId: coa.siteId, category: COA_DOCUMENT_CATEGORY }),
   });
 
   const updateMutation = useMutation({
@@ -367,7 +368,7 @@ function CoaDetailModal({ coa, onClose, onDone, onDeleted }: { coa: Coa; onClose
             </div>
 
             <div className="mt-4 border-t border-zinc-800 pt-3">
-              <div className="mb-1 text-[10px] font-semibold uppercase text-slate-400">Cert. of Waiver or Authorization document</div>
+              <div className="mb-1 text-[10px] font-semibold uppercase text-slate-400">{COA_DOCUMENT_CATEGORY} document</div>
               {coaDocs && coaDocs.length > 0 ? (
                 <div className="space-y-1">
                   {coaDocs.map((d) => (
@@ -377,7 +378,7 @@ function CoaDetailModal({ coa, onClose, onDone, onDeleted }: { coa: Coa; onClose
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-slate-400">No "Cert. of Waiver or Authorization" document on file for this site.</p>
+                <p className="text-xs text-slate-400">No "{COA_DOCUMENT_CATEGORY}" document on file for this site.</p>
               )}
             </div>
 

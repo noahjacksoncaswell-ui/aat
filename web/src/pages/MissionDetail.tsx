@@ -571,7 +571,11 @@ function DispositionModal({ missionId, onClose, onDone }: { missionId: string; o
         const fd = new FormData();
         fd.append("file", file);
         fd.append("title", `Post-Flight Report — ${missionId.slice(0, 8)}`);
-        fd.append("category", "Post-Flight/Anomaly Report");
+        // v4.1 Section 8.1 - "Post-Flight/Anomaly Report" was consolidated
+        // out of the category list; no replacement category fits this
+        // upload, so it falls back to "Other" like any other removed
+        // category, per the migration's own stated safe default.
+        fd.append("category", "Other");
         fd.append("missionId", missionId);
         await uploadDocument(fd);
       }

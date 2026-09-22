@@ -426,20 +426,31 @@ export interface DocumentRecord {
   auditLog?: DocumentAuditEntry[];
 }
 
+// Revision Directive v4.1 Section 8.2 - the "[PC]" (Portal Connected)
+// suffix marks a category that, once selected, cross-links the document
+// elsewhere in the app beyond the Documentation Library itself. This is a
+// standing convention for this category system going forward, not a
+// one-time naming choice limited to these two entries - exported as
+// constants so any future portal-connected category (and the code that
+// looks it up) stays in sync with its exact label here.
+export const LANDOWNER_AUTHORIZATION_CATEGORY = "Landowner Authorization [PC]";
+export const COA_DOCUMENT_CATEGORY = "Cert. of Waiver or Authorization [PC]";
+
+// Full replacement per v4.1 Section 8.1, superseding the category list
+// established across v2.0/v3.0/v3.1: Range Safety Package, FTS
+// Documentation, LRR/FRR packages, Environmental/Permitting, Weather
+// Waiver Request, Post-Flight/Anomaly Report, SOP, and Checklist are
+// consolidated into this shorter list. Any document previously tagged
+// with one of those removed categories is re-mapped to "Other" by
+// server/scripts/remapDocumentCategories.ts - see README for details.
 export const DOCUMENT_CATEGORIES = [
   "Mission Operations Plan (MOP)",
-  "Range Safety Package",
-  "Flight Termination System (FTS) Documentation",
-  "Launch/Flight Readiness Review (LRR/FRR)",
-  "Environmental/Permitting",
-  "Landowner Authorization",
-  "Cert. of Waiver or Authorization",
+  "Certification of Mission Readiness (CoMR)",
+  "Certification of Flight Readiness (CoFR)",
+  LANDOWNER_AUTHORIZATION_CATEGORY,
+  COA_DOCUMENT_CATEGORY,
   "Vehicle Certification & Test Data",
-  "FAA Correspondence / COA / NOTAM",
-  "Weather Waiver Request",
-  "Post-Flight/Anomaly Report",
-  "Standard Operating Procedure (SOP)",
-  "Checklist",
-  "Launch Countdown Procedure (LCP)",
+  "Launch Countdown Procedure",
+  "Mission Execution Forecast (Weather)",
   "Other",
 ];

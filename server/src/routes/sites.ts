@@ -9,7 +9,10 @@ import { computeCoaStatus } from "../services/faa";
 
 const router = Router();
 
-const LANDOWNER_AUTH_CATEGORY = "Landowner Authorization";
+// v4.1 Section 8.2 - "[PC]" (Portal Connected) is now part of the category's
+// literal name; keep this string in sync with LANDOWNER_AUTHORIZATION_CATEGORY
+// in web/src/types/index.ts.
+const LANDOWNER_AUTH_CATEGORY = "Landowner Authorization [PC]";
 
 router.get("/", async (_req, res) => {
   const sites = await prisma.site.findMany({ orderBy: { name: "asc" } });

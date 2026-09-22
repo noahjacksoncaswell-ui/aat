@@ -150,3 +150,21 @@ npm run dev                # http://localhost:5173 (proxies /api and /socket.io 
   `dark` is now permanently set on `<html>`, the light-mode utility never
   renders and is dead weight, not a behavioral gap - a mechanical follow-up
   pass could collapse these to single classes if desired.
+
+## Migration notes
+
+- **Revision Directive v4.1 Section 8.1 - document category list replaced.**
+  Range Safety Package, FTS Documentation, LRR/FRR packages,
+  Environmental/Permitting, Weather Waiver Request, Post-Flight/Anomaly
+  Report, Standard Operating Procedure, and Checklist were all consolidated
+  out of `DOCUMENT_CATEGORIES` (`web/src/types/index.ts`); Landowner
+  Authorization and Cert. of Waiver or Authorization picked up the
+  standing `[PC]` ("Portal Connected") suffix convention (Section 8.2) for
+  any category whose selection cross-links the document elsewhere in the
+  app. `Document.category` is a plain string column, so no schema
+  migration runs automatically - against any database with documents
+  predating this revision, run `npx tsx scripts/remapDocumentCategories.ts`
+  from `server/` once. It re-maps every document tagged with a
+  now-removed category to `Other` and logs each one it touched; an Admin
+  should review that list afterward and manually re-categorize any that
+  fit better under a category more specific than `Other`.
