@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from "react-leaflet";
 import L from "leaflet";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { addSitePhoto, createSite, fetchCoas, fetchSite, fetchSiteWeather, fetchSites, updateSite } from "../api/resources";
@@ -36,7 +36,16 @@ const TILE_LAYERS = {
     url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
     attribution: "Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap",
   },
+  // Revision Directive v4.0 Section 3.1 - VFR sectional-chart-style
+  // aeronautical layer, alongside the three base layers above.
+  aviation: {
+    label: "Aviation",
+    url: "https://wms.chartbundle.com/tms/1.0.0/sec/{z}/{x}/{y}.png?origin=nw",
+    attribution: "Sectional chart tiles courtesy ChartBundle; source data U.S. FAA",
+  },
 };
+
+const NM_TO_METERS = 1852;
 
 function FlyToSite({ site }: { site: Site | undefined }) {
   const map = useMap();
@@ -50,10 +59,19 @@ export default function Sites() {
   const { siteId } = useParams();
   const navigate = useNavigate();
   const { data: sites } = useQuery({ queryKey: ["sites"], queryFn: fetchSites });
+  const { data: coas } = useQuery({ queryKey: ["coas-all"], queryFn: () => fetchCoas() });
   const [layer, setLayer] = useState<keyof typeof TILE_LAYERS>("street");
   const [showNewSite, setShowNewSite] = useState(false);
 
   const selectedSite = sites?.find((s) => s.id === siteId);
+
+  // Revision Directive v4.0 Section 3.2 - one shaded circle per site with an
+  // ACTIVE COA on file, radius = that COA's Authorized Operation Radius.
+  // Independent of, and rendered alongside, the site pin markers below.
+  const activeCoaBySiteId = new Map<string, NonNullable<typeof coas>[number]>();
+  for (const c of coas ?? []) {
+    if (c.status === "ACTIVE" && !activeCoaBySiteId.has(c.siteId)) activeCoaBySiteId.set(c.siteId, c);
+  }
 
   return (
     <div className="flex h-full">
@@ -81,6 +99,17 @@ export default function Sites() {
         </RequireRole>
         <MapContainer center={[34.5, -84.5]} zoom={7} className="h-full w-full">
           <TileLayer url={TILE_LAYERS[layer].url} attribution={TILE_LAYERS[layer].attribution} />
+          {sites?.map((site) => {
+            const activeCoa = activeCoaBySiteId.get(site.id);
+            return activeCoa ? (
+              <Circle
+                key={`coa-${site.id}`}
+                center={[site.lat, site.lon]}
+                radius={activeCoa.authorizedOperationRadiusNm * NM_TO_METERS}
+                pathOptions={{ color: "#000000", weight: 2, fillColor: "#f59e0b", fillOpacity: 0.15 }}
+              />
+            ) : null;
+          })}
           {sites?.map((site) => (
             <Marker
               key={site.id}
@@ -91,6 +120,11 @@ export default function Sites() {
               <Popup>
                 <div className="font-semibold">{site.name}</div>
                 <div className="text-xs">{site.designator}</div>
+                {activeCoaBySiteId.has(site.id) && (
+                  <div className="text-xs text-slate-500">
+                    COA {activeCoaBySiteId.get(site.id)!.coaNumber} — {activeCoaBySiteId.get(site.id)!.authorizedOperationRadiusNm} nm radius
+                  </div>
+                )}
               </Popup>
             </Marker>
           ))}
