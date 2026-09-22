@@ -129,7 +129,7 @@ export default function LwccTab({ missionId, site }: { missionId: string; site: 
               <th className="px-3 py-2">LWCC No.</th>
               <th className="px-3 py-2">Description</th>
               <th className="px-3 py-2">Limit / Requirement</th>
-              <th className="px-3 py-2 text-aat-caution">Report</th>
+              <th className="px-3 py-2">Report</th>
               <th className="px-3 py-2">Current</th>
               <th className="px-3 py-2">Violation Risk (15 Min)</th>
               <th className="px-3 py-2">Violation Risk (30 Min)</th>
@@ -142,7 +142,7 @@ export default function LwccTab({ missionId, site }: { missionId: string; site: 
                 <td className="px-3 py-2 font-mono">LWCCR {row.no}</td>
                 <td className="px-3 py-2">{row.description}</td>
                 <td className="px-3 py-2 max-w-xs text-slate-500 dark:text-slate-400">{row.limitText}</td>
-                <td className="px-3 py-2 text-aat-caution">
+                <td className="px-3 py-2">
                   {row.mode === "LIVE" ? (
                     "--"
                   ) : (
