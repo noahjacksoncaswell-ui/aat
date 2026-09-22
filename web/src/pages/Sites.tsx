@@ -37,11 +37,17 @@ const TILE_LAYERS = {
     attribution: "Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap",
   },
   // Revision Directive v4.0 Section 3.1 - VFR sectional-chart-style
-  // aeronautical layer, alongside the three base layers above.
+  // aeronautical layer, alongside the three base layers above. ChartBundle
+  // (the original source) shut down permanently in early 2024; v4.1
+  // replaces it with the FAA's own VFR Sectional tile cache, hosted on
+  // ArcGIS Online by FAA Aeronautical Information Services, using the same
+  // Esri tiled-MapServer URL scheme already proven working for the
+  // Satellite layer above (no esri-leaflet plugin needed - it's a plain
+  // XYZ-compatible fused tile cache).
   aviation: {
     label: "Aviation",
-    url: "https://wms.chartbundle.com/tms/1.0.0/sec/{z}/{x}/{y}.png?origin=nw",
-    attribution: "Sectional chart tiles courtesy ChartBundle; source data U.S. FAA",
+    url: "https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/VFR_Sectional/MapServer/tile/{z}/{y}/{x}",
+    attribution: "VFR Sectional tiles courtesy FAA Aeronautical Information Services (ArcGIS Online)",
   },
 };
 
