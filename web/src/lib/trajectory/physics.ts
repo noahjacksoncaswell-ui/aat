@@ -317,4 +317,9 @@ function buildPhaseSummaries(timeSeries: TimeSeriesPoint[]): PhaseSummary[] {
   return summaries;
 }
 
+/** Instantaneous thrust magnitude (N) - constant during Phase 1, zero otherwise. Used for the Thrust vs. Time graph (Section 6.2). */
+export function thrustAt(tS: number, config: SimConfig): number {
+  return tS <= config.vehicle.burnTimeS ? config.vehicle.totalImpulseNs / config.vehicle.burnTimeS : 0;
+}
+
 export { referenceArea };

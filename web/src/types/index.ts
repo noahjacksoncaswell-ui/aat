@@ -486,6 +486,11 @@ export const LOT_CERTIFICATION_TEXTS: string[] = [
 // consolidated into this shorter list. Any document previously tagged
 // with one of those removed categories is re-mapped to "Other" by
 // server/scripts/remapDocumentCategories.ts - see README for details.
+// v6.0 Section 6.5 - "Trajectory Simulation Report" added, no [PC] marker
+// (this category does not need to surface elsewhere in the portal beyond
+// the Documentation Library itself).
+export const TRAJECTORY_SIMULATION_REPORT_CATEGORY = "Trajectory Simulation Report";
+
 export const DOCUMENT_CATEGORIES = [
   "Mission Operations Plan (MOP)",
   "Certification of Mission Readiness (CoMR)",
@@ -495,5 +500,6 @@ export const DOCUMENT_CATEGORIES = [
   "Vehicle Certification & Test Data",
   "Launch Countdown Procedure",
   "Mission Execution Forecast (Weather)",
+  TRAJECTORY_SIMULATION_REPORT_CATEGORY,
   "Other",
 ];
