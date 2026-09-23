@@ -5,10 +5,16 @@ import { api } from "../api/client";
 
 const CONFIDENTIALITY_TEXT = `By proceeding, you acknowledge and agree that: (a) you are an authorized employee or agent of the Launch Operations Division of American Aerospace Technologies Corp; (b) all technical data, documentation, and information accessible through this system is the confidential and proprietary property of American Aerospace Technologies Corp and/or its affiliates; (c) you shall not disclose, reproduce, transmit, or otherwise disseminate any information accessed through this system, in whole or in part, to any person or entity not authorized to receive it; (d) unauthorized disclosure may result in civil liability and, where ITAR-controlled technical data is implicated, criminal penalties under the Arms Export Control Act; and (e) your access and activity within this system may be logged and audited.`;
 
+// v5.2 Section 2 - a two-step flow replaces the former single-page login:
+// Step 1 is a branded intro/splash (logo, org identification, the ITAR
+// notice widened and centered), Step 2 is the actual credential form,
+// relocated here unchanged. Pure layout/sequencing - no change to
+// authentication logic, the acknowledgment gate, or any backend behavior.
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [step, setStep] = useState<1 | 2>(1);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
@@ -48,10 +54,18 @@ export default function Login() {
     }
   }
 
-  return (
-    <div className="flex min-h-screen items-center justify-center overflow-y-auto bg-black px-4 py-3">
-      <div className="grid w-full max-w-4xl gap-3 md:grid-cols-[1fr_1.1fr] md:items-stretch">
-        <div className="flex flex-col justify-center border border-aat-caution bg-aat-caution/10 px-5 py-4 text-center md:text-left">
+  if (step === 1) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center overflow-y-auto bg-black px-4 py-8 text-center">
+        <img src="/logo.webp" alt="American Aerospace" className="w-full max-w-[300px]" />
+
+        <div className="mt-6 space-y-1">
+          <div className="text-lg font-bold uppercase tracking-wide text-white">American Aerospace Technologies Corporation</div>
+          <div className="text-sm font-semibold uppercase tracking-wide text-zinc-300">Launch Operations Division</div>
+          <div className="text-sm font-semibold uppercase tracking-wide text-zinc-400">Launch Operations and Information System (LOIS)</div>
+        </div>
+
+        <div className="mt-8 w-[65%] border border-aat-caution bg-aat-caution/10 px-5 py-4">
           <p className="text-xs font-bold uppercase tracking-wide text-aat-caution">ITAR-Controlled // Distribution Is Limited</p>
           <p className="normal-case mt-2 text-[11px] leading-snug text-zinc-300">
             This system contains ITAR-controlled technical data as defined in 22 CFR Part 120.10. Access is restricted to U.S. persons as
@@ -62,13 +76,22 @@ export default function Login() {
           </p>
         </div>
 
-        <div className="border border-zinc-800 bg-aat-steel p-5">
-          <div className="mb-3 flex flex-col items-center gap-1 text-center">
-            <div className="flex h-10 w-10 items-center justify-center border border-white bg-white text-lg font-bold text-black">A</div>
-            <h1 className="text-base font-semibold text-white">AAT Launch Operations Division</h1>
-            <p className="text-xs tracking-widest text-zinc-400">Internal Use // Company Confidential</p>
-          </div>
+        <button onClick={() => setStep(2)} className="btn-primary mt-8">
+          Proceed to Login
+        </button>
+      </div>
+    );
+  }
 
+  return (
+    <div className="flex min-h-screen items-center justify-center overflow-y-auto bg-black px-4 py-8">
+      <div className="w-full max-w-sm">
+        <div className="mb-5 flex flex-col items-center gap-3 text-center">
+          <img src="/logo.webp" alt="American Aerospace" className="w-full max-w-[170px]" />
+          <h1 className="text-sm font-bold uppercase tracking-wide text-white">AAT Launch Operations and Information System (LOIS)</h1>
+        </div>
+
+        <div className="border border-zinc-800 bg-aat-steel p-5">
           {!forgotMode ? (
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>

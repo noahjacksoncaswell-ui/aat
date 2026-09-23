@@ -25,12 +25,12 @@ export default function Layout() {
     <div className="flex h-screen w-full flex-col overflow-hidden bg-black text-zinc-100">
       <div className="flex flex-1 overflow-hidden">
         <aside className="flex w-64 shrink-0 flex-col border-r border-zinc-800 bg-aat-navy">
-          <div className="flex items-center gap-2 border-b border-zinc-800 px-5 py-5">
-            <div className="flex h-9 w-9 items-center justify-center border border-white bg-white font-bold text-black">A</div>
-            <div>
-              <div className="text-sm font-semibold leading-tight">AAT LOD</div>
-              <div className="text-[11px] text-zinc-400">Launch Ops Division</div>
-            </div>
+          {/* v5.2 Section 1 - the logo replaces the former square "A" mark +
+              AAT/Launch Ops Division text entirely; it is bounded to this
+              row's existing footprint (the surrounding px-5 py-5 padding is
+              unchanged) rather than the sidebar being resized to fit it. */}
+          <div className="flex items-center border-b border-zinc-800 px-5 py-5">
+            <img src="/logo.webp" alt="American Aerospace" className="h-auto w-full" />
           </div>
           <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
             {navItems.map((item) => (
