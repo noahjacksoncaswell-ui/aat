@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { usePreferences } from "../context/PreferencesContext";
@@ -23,7 +23,9 @@ export default function Layout() {
   const navigate = useNavigate();
 
   // v5.3 Item 2 - live UTC/Local clocks above the sitewide toggle.
-  const { utcTime, localTime } = useLiveClock();
+  // Milliseconds are a sidebar-only display option (nowhere else uses them).
+  const [showMs, setShowMs] = useState(false);
+  const { utcTime, localTime } = useLiveClock({ showMs });
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-black text-zinc-100">
@@ -67,18 +69,24 @@ export default function Layout() {
           {/* Label inline before each time (UTC / LOC) instead of stacked
               above it, so each clock is a single compact row - same time
               font size as before, far less vertical space. Active-mode
-              yellow outline (aat-caution) preserved. */}
+              yellow outline (aat-caution) preserved. Boxes are full-width
+              (matching Toggle Sitewide below), which gives room for the
+              optional milliseconds display - sidebar-only, nowhere else. */}
           <div className="space-y-2 border-t border-zinc-800 px-4 py-3">
             <div className="space-y-1.5">
-              <div className={`mx-auto flex w-[65%] items-baseline justify-center gap-2 border px-2 py-1 ${useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
+              <div className={`flex w-full items-baseline justify-center gap-2 border px-2 py-1 ${useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
                 <span className="text-[10px] uppercase tracking-wide text-zinc-500">UTC</span>
                 <span className="font-mono text-xl tabular-nums text-zinc-100">{utcTime}</span>
               </div>
-              <div className={`mx-auto flex w-[65%] items-baseline justify-center gap-2 border px-2 py-1 ${!useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
+              <div className={`flex w-full items-baseline justify-center gap-2 border px-2 py-1 ${!useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
                 <span className="text-[10px] uppercase tracking-wide text-zinc-500">LOC</span>
                 <span className="font-mono text-xl tabular-nums text-zinc-100">{localTime}</span>
               </div>
             </div>
+            <label className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-500">
+              <input type="checkbox" checked={showMs} onChange={(e) => setShowMs(e.target.checked)} className="shrink-0" />
+              Show Milliseconds
+            </label>
             <button onClick={toggleZulu} className="w-full border border-zinc-700 px-2 py-1.5 text-left text-[11px] hover:bg-zinc-900">
               Toggle Sitewide
             </button>
