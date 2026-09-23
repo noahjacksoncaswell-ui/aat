@@ -22,7 +22,19 @@ import type { Mission } from "../types";
  * returned text (W-/W+, T-/T+, L-/L+) - this is what fixes the prior
  * defect where the Test and Launch boxes both rendered a "T-" prefix.
  */
-export default function PersistentClockHeader({ mission, large }: { mission: Mission; large?: boolean }) {
+export default function PersistentClockHeader({
+  mission,
+  large,
+  abbreviated,
+}: {
+  mission: Mission;
+  large?: boolean;
+  /** v5.4 (Abbreviated Status Text directive) - Range Ops Display only. Shortens
+   * pending/hold status strings so they don't force the clock boxes to
+   * resize on that page's large-format layout. Every other caller of this
+   * component omits it and keeps the current full-length wording. */
+  abbreviated?: boolean;
+}) {
   const { useZulu } = usePreferences();
   const [now, setNow] = useState(new Date());
   const [fetchedAt, setFetchedAt] = useState(new Date());
@@ -100,13 +112,13 @@ export default function PersistentClockHeader({ mission, large }: { mission: Mis
 
   let launchValue: string;
   if (!state?.lot) {
-    launchValue = "PENDING (NO LOT SET)";
+    launchValue = abbreviated ? "PENDING" : "PENDING (NO LOT SET)";
   } else if (liftoffComplete) {
     launchValue = "LIFTOFF CONFIRMED";
   } else if (unscheduledHoldActive) {
-    launchValue = "UNSCHEDULED HOLD";
+    launchValue = abbreviated ? "UNSCH. HOLD" : "UNSCHEDULED HOLD";
   } else if (programmedHoldOverage) {
-    launchValue = "HOLD ELAPSED";
+    launchValue = abbreviated ? "HOLD ELAP." : "HOLD ELAPSED";
   } else {
     launchValue = launchCountdown!.text;
   }
@@ -117,7 +129,7 @@ export default function PersistentClockHeader({ mission, large }: { mission: Mis
         <ClockCell
           label="Window Clock"
           sublabel="Launch opportunity window"
-          value={targeted ? windowCountdown!.text : "PENDING (NO TLO SEL)"}
+          value={targeted ? windowCountdown!.text : abbreviated ? "PENDING" : "PENDING (NO TLO SEL)"}
           large={large}
         />
         <TargetSubBox value={targeted ? formatTimestamp(targeted.windowOpen, useZulu) : "--"} large={large} />
@@ -133,7 +145,9 @@ export default function PersistentClockHeader({ mission, large }: { mission: Mis
           }
           value={
             !state || state.tCountStatus === "PENDING"
-              ? "PENDING (NO LOT SET)"
+              ? abbreviated
+                ? "PENDING"
+                : "PENDING (NO LOT SET)"
               : state.tCountStatus === "COMPLETE" && state.liftoffActualTime
                 ? formatMet(state.liftoffActualTime, now)
                 : formatTMinus(tMinus)

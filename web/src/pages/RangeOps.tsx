@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchCountdownState, fetchLwccState, fetchMission, fetchMissions } from "../api/resources";
 import { useMissionSocket } from "../hooks/useSocket";
+import { useLiveClock } from "../hooks/useLiveClock";
 import { usePreferences } from "../context/PreferencesContext";
 import { formatTimestamp } from "../utils/time";
 import { goNoGoTone } from "../components/StatusPill";
@@ -27,6 +28,7 @@ import type { GoNoGoStatus, Mission } from "../types";
 export default function RangeOps() {
   const qc = useQueryClient();
   const { useZulu } = usePreferences();
+  const { utcTime, localTime } = useLiveClock();
   const [selectedId, setSelectedId] = useState<string>("");
   const [defaulted, setDefaulted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
@@ -144,26 +146,46 @@ export default function RangeOps() {
           </div>
         ) : (
           <div className="mx-auto max-w-[1600px] space-y-6">
-            <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-zinc-800 pb-4">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800 pb-4">
               <div>
                 <div className="text-4xl font-bold uppercase tracking-wide">{mission.name}</div>
                 <div className="mt-1 text-lg text-zinc-400">
                   {mission.designator} · {mission.vehicle.name} · {mission.site.name}
                 </div>
               </div>
-              <div className="text-lg font-semibold uppercase tracking-wide text-zinc-400">{mission.status.replace("_", " ")}</div>
+              {/* v5.4 Section 1 - same live UTC/Local clocks as the sidebar
+                  instance (v5.3 Section 2), placed here for this page
+                  specifically; the sidebar instance itself is untouched. */}
+              <div className="flex items-center gap-4">
+                <div className={`border px-4 py-2 text-center ${useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
+                  <div className="text-[10px] uppercase tracking-wide text-zinc-500">UTC</div>
+                  <div className="font-mono text-2xl tabular-nums text-zinc-100">{utcTime}</div>
+                </div>
+                <div className={`border px-4 py-2 text-center ${!useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
+                  <div className="text-[10px] uppercase tracking-wide text-zinc-500">Local</div>
+                  <div className="font-mono text-2xl tabular-nums text-zinc-100">{localTime}</div>
+                </div>
+                <div className="text-lg font-semibold uppercase tracking-wide text-zinc-400">{mission.status.replace("_", " ")}</div>
+              </div>
             </div>
 
-            <PersistentClockHeader mission={mission} large />
+            <PersistentClockHeader mission={mission} large abbreviated />
 
             {activeHold && (
               <section className="card border-2 border-aat-caution bg-aat-caution/10 p-6">
-                <div className="text-2xl">
+                {/* v5.4 Section 2 - sized to match the LWCC banner below
+                    (text-xl header, text-base body) on this page only; the
+                    Countdown tab's own hold banner is untouched. */}
+                <div className="text-xl">
                   <strong>ACTIVE HOLD</strong> at T-{secondsToHms(activeHold.holdMarkSeconds)} — {activeHold.type}
                   {activeHold.reason ? ` — ${activeHold.reason}` : ""}
                 </div>
                 {activeHold.actualStartedAt && (
-                  <ElapsedIndicator startedAt={activeHold.actualStartedAt} estimatedSeconds={activeHold.estimatedDurationSeconds ?? undefined} large />
+                  <ElapsedIndicator
+                    startedAt={activeHold.actualStartedAt}
+                    estimatedSeconds={activeHold.estimatedDurationSeconds ?? undefined}
+                    textClassName="mt-2 text-base"
+                  />
                 )}
               </section>
             )}

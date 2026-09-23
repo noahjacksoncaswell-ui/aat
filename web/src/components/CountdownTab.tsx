@@ -558,10 +558,15 @@ export function ElapsedIndicator({
   startedAt,
   estimatedSeconds,
   large,
+  textClassName,
 }: {
   startedAt: string;
   estimatedSeconds?: number;
   large?: boolean;
+  /** v5.4 Section 2 - Range Ops Display only, overrides the size portion of
+   * the default large/normal classes to match that page's LWCC banner body
+   * text exactly. Every other caller omits this and keeps large/normal. */
+  textClassName?: string;
 }) {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
@@ -571,10 +576,9 @@ export function ElapsedIndicator({
   const elapsed = (now.getTime() - new Date(startedAt).getTime()) / 1000;
   const elapsedText = secondsToHms(elapsed);
   const durationElapsed = estimatedSeconds != null && elapsed >= estimatedSeconds;
+  const sizeClassName = textClassName ?? (large ? "mt-2 text-xl" : "mt-1 text-xs");
   return (
-    <div
-      className={`${large ? "mt-2 text-xl" : "mt-1 text-xs"} ${durationElapsed ? "animate-pulse font-bold text-aat-nogo" : "text-slate-500 dark:text-slate-400"}`}
-    >
+    <div className={`${sizeClassName} ${durationElapsed ? "animate-pulse font-bold text-aat-nogo" : "text-slate-500 dark:text-slate-400"}`}>
       Elapsed: {elapsedText}
       {estimatedSeconds != null ? ` / est. ${secondsToHms(estimatedSeconds)}` : ""}
       {durationElapsed ? " — DURATION ELAPSED, AWAITING RELEASE" : ""}
