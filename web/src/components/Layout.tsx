@@ -1,8 +1,12 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { usePreferences } from "../context/PreferencesContext";
 import ClassificationFooter from "./ClassificationFooter";
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
 
 const navItems = [
   { to: "/", label: "Dashboard", end: true },
@@ -20,6 +24,15 @@ export default function Layout() {
   const { user, logout, isAdmin } = useAuth();
   const { useZulu, toggleZulu } = usePreferences();
   const navigate = useNavigate();
+
+  // v5.3 Item 2 - live UTC/Local clocks above the sitewide toggle.
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const utcTime = `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`;
+  const localTime = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-black text-zinc-100">
@@ -61,8 +74,18 @@ export default function Layout() {
             )}
           </nav>
           <div className="space-y-2 border-t border-zinc-800 px-4 py-4 text-xs">
+            <div className="grid grid-cols-2 gap-1.5">
+              <div className={`border px-1.5 py-1 text-center ${useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
+                <div className="text-[9px] uppercase tracking-wide text-zinc-500">UTC</div>
+                <div className="font-mono text-xs tabular-nums text-zinc-100">{utcTime}</div>
+              </div>
+              <div className={`border px-1.5 py-1 text-center ${!useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
+                <div className="text-[9px] uppercase tracking-wide text-zinc-500">Local</div>
+                <div className="font-mono text-xs tabular-nums text-zinc-100">{localTime}</div>
+              </div>
+            </div>
             <button onClick={toggleZulu} className="w-full border border-zinc-700 px-2 py-1.5 text-left text-[11px] hover:bg-zinc-900">
-              {useZulu ? "ZULU (UTC)" : "LOCAL TIME"} — TOGGLE
+              Toggle Sitewide
             </button>
           </div>
           <div className="border-t border-zinc-800 px-4 py-4">

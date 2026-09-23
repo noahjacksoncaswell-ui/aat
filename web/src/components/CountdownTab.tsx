@@ -8,6 +8,7 @@ import {
   fetchCoas,
   fetchCountdownState,
   fetchDocuments,
+  fetchLwccState,
   fetchMilestoneTemplateOptions,
   generateMilestoneSequence,
   markLiftoff,
@@ -24,6 +25,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { usePreferences } from "../context/PreferencesContext";
 import { tickTMinusSeconds } from "../utils/countdownMath";
+import { formatTimestamp } from "../utils/time";
 import { DocumentLink } from "./DocumentLink";
 import { COMR_DOCUMENT_CATEGORY, LOT_CERTIFICATION_TEXTS } from "../types";
 import type { Mission, MissionHold } from "../types";
@@ -83,7 +85,7 @@ export default function CountdownTab({ mission, onRequestScrub }: { mission: Mis
           {state.activeHold?.status === "ACTIVE" && state.activeHold.isCofrComplianceHold && (
             <CofrComplianceGateAlert mission={mission} hold={state.activeHold} />
           )}
-          <HoldManagement mission={mission} state={state} isLaunchDirector={isLaunchDirector} />
+          <HoldManagement mission={mission} state={state} isLaunchDirector={isLaunchDirector} tMinus={tMinus} />
           <TimeControls mission={mission} state={state} onRequestScrub={onRequestScrub} />
         </>
       )}
@@ -242,7 +244,17 @@ function CofrComplianceGateAlert({ mission, hold }: { mission: Mission; hold: Mi
   );
 }
 
-function HoldManagement({ mission, state, isLaunchDirector }: { mission: Mission; state: any; isLaunchDirector: boolean }) {
+function HoldManagement({
+  mission,
+  state,
+  isLaunchDirector,
+  tMinus,
+}: {
+  mission: Mission;
+  state: any;
+  isLaunchDirector: boolean;
+  tMinus: number | null;
+}) {
   const { useZulu } = usePreferences();
   const qc = useQueryClient();
   const [newHold, setNewHold] = useState({ holdMark: "00:30:00", duration: "00:15:00", reason: "" });
@@ -254,9 +266,13 @@ function HoldManagement({ mission, state, isLaunchDirector }: { mission: Mission
     qc.invalidateQueries({ queryKey: ["mission", mission.id] });
   };
 
+  // v5.3 Item 1 - both mutations take their payload as a `.mutate()`
+  // argument rather than closing over component state, so the LWCC panel's
+  // auto-populated buttons below can invoke these exact same mutation
+  // objects (same endpoint, zero new hold logic) without the stale-closure
+  // bug that would come from calling setState immediately before .mutate().
   const addHold = useMutation({
-    mutationFn: () =>
-      addProgrammedHold(mission.id, { holdMarkSeconds: hmsToSeconds(newHold.holdMark), estimatedDurationSeconds: hmsToSeconds(newHold.duration), reason: newHold.reason }),
+    mutationFn: (data: { holdMarkSeconds: number; estimatedDurationSeconds: number; reason: string }) => addProgrammedHold(mission.id, data),
     onSuccess: () => {
       invalidate();
       setNewHold({ holdMark: "00:30:00", duration: "00:15:00", reason: "" });
@@ -265,7 +281,7 @@ function HoldManagement({ mission, state, isLaunchDirector }: { mission: Mission
   const removeHoldMutation = useMutation({ mutationFn: (id: string) => removeHold(mission.id, id), onSuccess: invalidate });
   const releaseHoldMutation = useMutation({ mutationFn: (id: string) => releaseHold(mission.id, id), onSuccess: invalidate });
   const callHoldMutation = useMutation({
-    mutationFn: () => callHold(mission.id, callReason),
+    mutationFn: (reason: string) => callHold(mission.id, reason),
     onSuccess: () => {
       invalidate();
       setShowCall(false);
@@ -279,6 +295,50 @@ function HoldManagement({ mission, state, isLaunchDirector }: { mission: Mission
   const [showAutoConfirm, setShowAutoConfirm] = useState(false);
 
   const activeHold: MissionHold | undefined = state.holds.find((h: MissionHold) => h.status === "ACTIVE");
+
+  // v5.3 Item 1 - reads the exact same LWCC evaluation data the LWCC tab's
+  // own compliance banner uses (same query key, same server computation);
+  // this panel never re-derives violation status itself.
+  const { data: lwcc } = useQuery({
+    queryKey: ["lwcc", mission.id],
+    queryFn: () => fetchLwccState(mission.id),
+    refetchInterval: 30_000,
+  });
+  const [recNow, setRecNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setRecNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const [weatherHoldDuration, setWeatherHoldDuration] = useState("00:15:00");
+
+  const violatingRows = lwcc?.violatingRows ?? [];
+  // Section 7.4's existing distinction is holdExpiresAt: present only for
+  // requirements with a built-in wait period once that hold is active;
+  // null for an instantaneous-limit violation with no timer. Used as-is,
+  // not re-derived from LWCC_REQUIREMENTS.
+  const timedViolations = violatingRows.filter((r) => r.holdExpiresAt);
+  const untimedViolations = violatingRows.filter((r) => !r.holdExpiresAt);
+
+  let recommendation: string;
+  if (violatingRows.length === 0) {
+    recommendation = "NO LWCC VIOLATIONS — NO HOLD RECOMMENDED";
+  } else if (untimedViolations.length > 0) {
+    // An instantaneous-limit violation (wind, visibility, cloud coverage,
+    // etc.) has no known clearance time, so it takes precedence over any
+    // simultaneous timed violation - a countdown figure would be
+    // misleading when part of the hold has no countdown at all.
+    recommendation = "LWCC RECOMMENDS A HOLD UNTIL WEATHER VIOLATIONS CLEAR";
+  } else {
+    // Every violation present carries a timer; recommend whichever clears
+    // last (the binding constraint), live-recalculated every second so it
+    // always reflects whichever violation is CURRENTLY longest-remaining.
+    const longestRemainingSeconds = Math.max(
+      ...timedViolations.map((r) => (new Date(r.holdExpiresAt!).getTime() - recNow.getTime()) / 1000)
+    );
+    recommendation = `LWCC RECOMMENDS A HOLD OF ${secondsToHms(Math.max(0, longestRemainingSeconds))}`;
+  }
+
+  const weatherHoldReason = `Weather — LWCCR ${violatingRows.map((r) => r.no).join(", ")} violated`;
 
   return (
     <section className="card p-5">
@@ -398,11 +458,81 @@ function HoldManagement({ mission, state, isLaunchDirector }: { mission: Mission
           <input value={newHold.holdMark} onChange={(e) => setNewHold({ ...newHold, holdMark: e.target.value })} placeholder="T-mark HH:MM:SS" className="input" />
           <input value={newHold.duration} onChange={(e) => setNewHold({ ...newHold, duration: e.target.value })} placeholder="Est. duration HH:MM:SS" className="input" />
           <input value={newHold.reason} onChange={(e) => setNewHold({ ...newHold, reason: e.target.value })} placeholder="Reason (optional)" className="input" />
-          <button onClick={() => addHold.mutate()} className="btn-secondary text-xs">
+          <button
+            onClick={() =>
+              addHold.mutate({ holdMarkSeconds: hmsToSeconds(newHold.holdMark), estimatedDurationSeconds: hmsToSeconds(newHold.duration), reason: newHold.reason })
+            }
+            className="btn-secondary text-xs"
+          >
             Add programmed hold
           </button>
         </div>
       )}
+
+      {/* v5.3 Item 1 - LWCC Recommendation panel: restates the same LWCC
+          compliance data shown on the LWCC tab's own banner (not a
+          duplicate evaluation), adds a live-recalculated hold
+          recommendation, and offers two pre-populated entry points into
+          the exact same hold mutations used above - no new hold mechanics. */}
+      <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">LWCC Recommendation</div>
+          <span className={`text-xs font-bold uppercase ${violatingRows.length > 0 ? "text-aat-nogo" : "text-aat-go"}`}>
+            {violatingRows.length > 0 ? "VIOLATION" : "NO VIOLATION"}
+          </span>
+        </div>
+
+        {violatingRows.length > 0 && (
+          <ul className="mb-3 space-y-1">
+            {violatingRows.map((r) => (
+              <li key={r.no} className="font-mono text-xs text-slate-600 dark:text-slate-300">
+                — LWCCR {r.no} ({r.description})
+                {r.holdExpiresAt ? ` — HOLD ACTIVE, expires ${formatTimestamp(r.holdExpiresAt, useZulu)}` : ""}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="mb-3 border border-aat-caution bg-aat-caution/10 px-3 py-2 text-xs font-bold uppercase tracking-wide text-aat-caution">
+          {recommendation}
+        </div>
+
+        {isLaunchDirector && violatingRows.length > 0 && state.tCountStatus === "COUNTING" && (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <button onClick={() => callHoldMutation.mutate(weatherHoldReason)} className="btn-danger text-xs">
+              Weather Hold (Indefinite)
+            </button>
+            <div className="flex gap-2">
+              <input
+                value={weatherHoldDuration}
+                onChange={(e) => setWeatherHoldDuration(e.target.value)}
+                placeholder="Est. duration HH:MM:SS"
+                className="input"
+              />
+              <button
+                onClick={() =>
+                  addHold.mutate({
+                    // Auto-set to the current countdown position minus a
+                    // small safety margin: POST /countdown/holds rejects a
+                    // mark that is already >= the server's freshly-computed
+                    // T-minus at request time (see that route's validation),
+                    // which a mark read at the exact instant of the click
+                    // would trip the moment network/processing latency
+                    // passes. This is purely a client-side accommodation of
+                    // that existing, unmodified check - not a new rule.
+                    holdMarkSeconds: Math.max(0, Math.round(tMinus ?? state.currentTMinusSeconds ?? 0) - 3),
+                    estimatedDurationSeconds: hmsToSeconds(weatherHoldDuration),
+                    reason: weatherHoldReason,
+                  })
+                }
+                className="btn-secondary shrink-0 text-xs"
+              >
+                Weather Hold (Planned Duration)
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {showCall && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
@@ -413,7 +543,7 @@ function HoldManagement({ mission, state, isLaunchDirector }: { mission: Mission
               <button onClick={() => setShowCall(false)} className="btn-secondary">
                 Cancel
               </button>
-              <button onClick={() => callHoldMutation.mutate()} disabled={!callReason.trim()} className="btn-danger disabled:opacity-50">
+              <button onClick={() => callHoldMutation.mutate(callReason)} disabled={!callReason.trim()} className="btn-danger disabled:opacity-50">
                 Confirm hold
               </button>
             </div>
