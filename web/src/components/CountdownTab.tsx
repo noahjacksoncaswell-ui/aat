@@ -28,7 +28,7 @@ import { DocumentLink } from "./DocumentLink";
 import { COMR_DOCUMENT_CATEGORY, LOT_CERTIFICATION_TEXTS } from "../types";
 import type { Mission, MissionHold } from "../types";
 
-function secondsToHms(totalSeconds: number): string {
+export function secondsToHms(totalSeconds: number): string {
   const s = Math.max(0, Math.round(totalSeconds));
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
@@ -424,7 +424,15 @@ function HoldManagement({ mission, state, isLaunchDirector }: { mission: Mission
   );
 }
 
-function ElapsedIndicator({ startedAt, estimatedSeconds }: { startedAt: string; estimatedSeconds?: number }) {
+export function ElapsedIndicator({
+  startedAt,
+  estimatedSeconds,
+  large,
+}: {
+  startedAt: string;
+  estimatedSeconds?: number;
+  large?: boolean;
+}) {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -434,7 +442,9 @@ function ElapsedIndicator({ startedAt, estimatedSeconds }: { startedAt: string; 
   const elapsedText = secondsToHms(elapsed);
   const durationElapsed = estimatedSeconds != null && elapsed >= estimatedSeconds;
   return (
-    <div className={`mt-1 text-xs ${durationElapsed ? "animate-pulse font-bold text-aat-nogo" : "text-slate-500 dark:text-slate-400"}`}>
+    <div
+      className={`${large ? "mt-2 text-xl" : "mt-1 text-xs"} ${durationElapsed ? "animate-pulse font-bold text-aat-nogo" : "text-slate-500 dark:text-slate-400"}`}
+    >
       Elapsed: {elapsedText}
       {estimatedSeconds != null ? ` / est. ${secondsToHms(estimatedSeconds)}` : ""}
       {durationElapsed ? " — DURATION ELAPSED, AWAITING RELEASE" : ""}

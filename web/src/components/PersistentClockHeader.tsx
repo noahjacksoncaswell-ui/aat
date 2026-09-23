@@ -22,7 +22,7 @@ import type { Mission } from "../types";
  * returned text (W-/W+, T-/T+, L-/L+) - this is what fixes the prior
  * defect where the Test and Launch boxes both rendered a "T-" prefix.
  */
-export default function PersistentClockHeader({ mission }: { mission: Mission }) {
+export default function PersistentClockHeader({ mission, large }: { mission: Mission; large?: boolean }) {
   const { useZulu } = usePreferences();
   const [now, setNow] = useState(new Date());
   const [fetchedAt, setFetchedAt] = useState(new Date());
@@ -46,18 +46,18 @@ export default function PersistentClockHeader({ mission }: { mission: Mission })
 
   if (cancelled) {
     return (
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className={`grid grid-cols-1 gap-2 sm:grid-cols-3 ${large ? "sm:gap-4" : ""}`}>
         <div className="space-y-1">
-          <ClockCell label="Window Clock" sublabel="Launch opportunity window" value="MISSION CANCELLED" />
-          <TargetSubBox value="--" />
+          <ClockCell label="Window Clock" sublabel="Launch opportunity window" value="MISSION CANCELLED" large={large} />
+          <TargetSubBox value="--" large={large} />
         </div>
         <div className="space-y-1">
-          <ClockCell label="Test Clock" sublabel="Targeted Lift-Off Time (LOT)" value="MISSION CANCELLED" accent />
-          <TargetSubBox value="--" />
+          <ClockCell label="Test Clock" sublabel="Targeted Lift-Off Time (LOT)" value="MISSION CANCELLED" accent large={large} />
+          <TargetSubBox value="--" large={large} />
         </div>
         <div className="space-y-1">
-          <ClockCell label="Launch Clock" sublabel="Projected liftoff" value="MISSION CANCELLED" accent />
-          <TargetSubBox value="--" />
+          <ClockCell label="Launch Clock" sublabel="Projected liftoff" value="MISSION CANCELLED" accent large={large} />
+          <TargetSubBox value="--" large={large} />
         </div>
       </div>
     );
@@ -112,14 +112,15 @@ export default function PersistentClockHeader({ mission }: { mission: Mission })
   }
 
   return (
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+    <div className={`grid grid-cols-1 gap-2 sm:grid-cols-3 ${large ? "sm:gap-4" : ""}`}>
       <div className="space-y-1">
         <ClockCell
           label="Window Clock"
           sublabel="Launch opportunity window"
           value={targeted ? windowCountdown!.text : "PENDING (NO TLO SEL)"}
+          large={large}
         />
-        <TargetSubBox value={targeted ? formatTimestamp(targeted.windowOpen, useZulu) : "--"} />
+        <TargetSubBox value={targeted ? formatTimestamp(targeted.windowOpen, useZulu) : "--"} large={large} />
       </div>
 
       <div className="space-y-1">
@@ -139,26 +140,44 @@ export default function PersistentClockHeader({ mission }: { mission: Mission })
           }
           accent
           holding={state?.tCountStatus === "HOLDING"}
+          large={large}
         />
-        <TargetSubBox value={state?.lot ? formatTimestamp(state.lot, useZulu) : "--"} />
+        <TargetSubBox value={state?.lot ? formatTimestamp(state.lot, useZulu) : "--"} large={large} />
       </div>
 
       <div className="space-y-1">
-        <ClockCell label="Launch Clock" sublabel="Projected liftoff" value={launchValue} accent holding={openEndedHold} />
+        <ClockCell label="Launch Clock" sublabel="Projected liftoff" value={launchValue} accent holding={openEndedHold} large={large} />
         <TargetSubBox
           value={liftoffComplete ? formatTimestamp(state!.liftoffActualTime, useZulu) : projectedLiftoff ? formatTimestamp(projectedLiftoff, useZulu) : "--"}
+          large={large}
         />
       </div>
     </div>
   );
 }
 
-function ClockCell({ label, sublabel, value, accent, holding }: { label: string; sublabel: string; value: string; accent?: boolean; holding?: boolean }) {
+function ClockCell({
+  label,
+  sublabel,
+  value,
+  accent,
+  holding,
+  large,
+}: {
+  label: string;
+  sublabel: string;
+  value: string;
+  accent?: boolean;
+  holding?: boolean;
+  large?: boolean;
+}) {
   return (
-    <div className={`card flex flex-col items-center justify-center bg-aat-navy px-4 py-3 text-white ${accent ? "border-aat-caution" : ""}`}>
-      <div className="text-[10px] uppercase tracking-widest text-slate-400">{label}</div>
-      <div className={`font-mono text-xl font-bold tabular-nums ${holding ? "text-aat-caution" : ""}`}>{value}</div>
-      <div className="mt-0.5 text-[9px] uppercase tracking-wide text-slate-500">{sublabel}</div>
+    <div
+      className={`card flex flex-col items-center justify-center bg-aat-navy text-white ${accent ? "border-aat-caution" : ""} ${large ? "px-6 py-8" : "px-4 py-3"}`}
+    >
+      <div className={`uppercase tracking-widest text-slate-400 ${large ? "text-base" : "text-[10px]"}`}>{label}</div>
+      <div className={`font-mono font-bold tabular-nums ${holding ? "text-aat-caution" : ""} ${large ? "text-6xl" : "text-xl"}`}>{value}</div>
+      <div className={`uppercase tracking-wide text-slate-500 ${large ? "mt-2 text-sm" : "mt-0.5 text-[9px]"}`}>{sublabel}</div>
     </div>
   );
 }
@@ -167,8 +186,12 @@ function ClockCell({ label, sublabel, value, accent, holding }: { label: string;
 // light-gray-outline, dark-gray-interior styling (matching the Window
 // Clock main box), never the orange/yellow accent - that is reserved for
 // exactly the Test Clock and Launch Clock main boxes above, and only those.
-function TargetSubBox({ value }: { value: string }) {
+function TargetSubBox({ value, large }: { value: string; large?: boolean }) {
   return (
-    <div className="flex h-7 items-center justify-center border border-zinc-800 bg-zinc-900 px-2 text-[14px] font-mono text-slate-300">{value}</div>
+    <div
+      className={`flex items-center justify-center border border-zinc-800 bg-zinc-900 font-mono text-slate-300 ${large ? "h-14 px-2 text-3xl" : "h-7 px-2 text-[14px]"}`}
+    >
+      {value}
+    </div>
   );
 }

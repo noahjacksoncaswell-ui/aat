@@ -11,6 +11,9 @@ const navItems = [
   { to: "/vehicles", label: "Vehicles" },
   { to: "/faa", label: "FAA Coordination" },
   { to: "/documents", label: "Documentation Library" },
+  // v5.1 Section 2 - available to every role (a display surface, not a
+  // control surface), positioned second-to-last, immediately before Admin.
+  { to: "/range-ops", label: "Range Ops Display" },
 ];
 
 export default function Layout() {

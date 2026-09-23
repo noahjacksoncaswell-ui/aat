@@ -12,6 +12,7 @@ import Vehicles from "./pages/Vehicles";
 import Faa from "./pages/Faa";
 import Documents from "./pages/Documents";
 import Admin from "./pages/Admin";
+import RangeOps from "./pages/RangeOps";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -49,6 +50,17 @@ export default function App() {
         <Route path="/documents" element={<Documents />} />
         <Route path="/admin" element={<Admin />} />
       </Route>
+      {/* v5.1 Section 3 - outside the Layout-wrapped group deliberately: the
+          Range Ops Display page collapses the standard sidebar/header chrome
+          itself, which Layout's fixed <aside> cannot express as a variant. */}
+      <Route
+        path="/range-ops"
+        element={
+          <RequireAuth>
+            <RangeOps />
+          </RequireAuth>
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
