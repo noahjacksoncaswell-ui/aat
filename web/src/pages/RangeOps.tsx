@@ -29,6 +29,29 @@ export default function RangeOps() {
   const { useZulu } = usePreferences();
   const [selectedId, setSelectedId] = useState<string>("");
   const [defaulted, setDefaulted] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
+
+  // Section 3 - actual browser full-screen (hides the browser's own tab
+  // strip/address bar too, not just this app's sidebar chrome), the way a
+  // control-room kiosk display is meant to run. Browsers only grant
+  // fullscreen off a user gesture, so the best this can do unprompted is
+  // try once on mount (silently a no-op if refused) - the toggle button is
+  // the real, reliable entry point. `fullscreenchange` keeps state in sync
+  // when the viewer exits via Esc instead of the button.
+  useEffect(() => {
+    document.documentElement.requestFullscreen?.().catch(() => {});
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      document.documentElement.requestFullscreen().catch(() => {});
+    }
+  }
 
   const { data: missions } = useQuery({ queryKey: ["missions", {}], queryFn: () => fetchMissions() });
 
@@ -95,7 +118,19 @@ export default function RangeOps() {
               </option>
             ))}
           </select>
-          <Link to="/" className="border border-zinc-700 px-2.5 py-1.5 text-xs font-semibold text-zinc-400 hover:border-zinc-500 hover:text-zinc-200">
+          <button
+            onClick={toggleFullscreen}
+            className="border border-zinc-700 px-2.5 py-1.5 text-xs font-semibold text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+          >
+            {isFullscreen ? "⤢ Exit Full Screen" : "⛶ Full Screen"}
+          </button>
+          <Link
+            to="/"
+            onClick={() => {
+              if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+            }}
+            className="border border-zinc-700 px-2.5 py-1.5 text-xs font-semibold text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+          >
             ✕ Exit
           </Link>
         </div>
