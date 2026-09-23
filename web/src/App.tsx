@@ -13,6 +13,7 @@ import Faa from "./pages/Faa";
 import Documents from "./pages/Documents";
 import Admin from "./pages/Admin";
 import RangeOps from "./pages/RangeOps";
+import TrajectorySim from "./pages/TrajectorySim";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="/vehicles/:vehicleId" element={<Vehicles />} />
         <Route path="/faa" element={<Faa />} />
         <Route path="/documents" element={<Documents />} />
+        <Route path="/trajectory-sim" element={<TrajectorySim />} />
         <Route path="/admin" element={<Admin />} />
       </Route>
       {/* v5.1 Section 3 - outside the Layout-wrapped group deliberately: the
