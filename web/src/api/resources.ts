@@ -24,6 +24,8 @@ export const fetchSiteWeather = (id: string, refresh = false) =>
   api.get<WeatherSnapshot>(`/sites/${id}/weather${refresh ? "?refresh=true" : ""}`).then((r) => r.data);
 export const createSite = (data: Partial<Site>) => api.post("/sites", data).then((r) => r.data);
 export const updateSite = (id: string, data: Partial<Site>) => api.patch(`/sites/${id}`, data).then((r) => r.data);
+export const updateSiteFacilityContacts = (id: string, data: Partial<Site>) =>
+  api.patch(`/sites/${id}/facility-contacts`, data).then((r) => r.data);
 export const decommissionSite = (id: string) => api.delete(`/sites/${id}`);
 export const addSitePhoto = (id: string, url: string, caption?: string) =>
   api.post(`/sites/${id}/photos`, { url, caption }).then((r) => r.data);

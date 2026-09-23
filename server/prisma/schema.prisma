@@ -225,29 +225,33 @@ model UserMissionAssignment {
 // ---------------------------------------------------------------------------
 
 model Site {
-  id                       String        @id @default(uuid())
-  name                     String
-  designator               String        @unique
-  lat                      Float
-  lon                      Float
-  elevationMeters          Float?
-  status                   SiteStatus    @default(STANDBY)
-  type                     SiteType      @default(FIXED_PAD)
-  ownership                SiteOwnership @default(COMPANY_OWNED)
-  ownershipNotes           String?
-  jurisdictionNotes        String?
-  nearestPopulationCenters String?
-  nearestWaterBodies       String?
-  terrainType              String?
-  countryCode              String        @default("US")
-  // FAA facility cross-reference (Revision Directive v3.0 Section 6.4) - populated
-  // once per site so mission FAA & NOTAM tabs don't require re-entry per mission.
-  traconFacilityName       String?
-  traconPhone              String?
-  artccFacilityName        String?
-  artccPhone               String?
-  createdAt                DateTime      @default(now())
-  updatedAt                DateTime      @updatedAt
+  id                         String        @id @default(uuid())
+  name                       String
+  designator                 String        @unique
+  lat                        Float
+  lon                        Float
+  elevationMeters            Float?
+  status                     SiteStatus    @default(STANDBY)
+  type                       SiteType      @default(FIXED_PAD)
+  ownership                  SiteOwnership @default(COMPANY_OWNED)
+  ownershipNotes             String?
+  jurisdictionNotes          String?
+  nearestPopulationCenters   String?
+  nearestWaterBodies         String?
+  terrainType                String?
+  countryCode                String        @default("US")
+  // Facility Notification Contacts (Revision Directive v3.0 Section 6.4,
+  // renamed/made editable by v5.0 Section 5) - populated once per site so
+  // mission FAA & NOTAM tabs don't require re-entry per mission.
+  traconFacilityName         String?
+  traconPhone                String?
+  artccFacilityName          String?
+  artccPhone                 String?
+  otherFacilityName          String?
+  otherFacilityPhone         String?
+  otherFacilityNotApplicable Boolean       @default(false)
+  createdAt                  DateTime      @default(now())
+  updatedAt                  DateTime      @updatedAt
 
   photos         SitePhoto[]
   missions       Mission[]

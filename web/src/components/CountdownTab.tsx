@@ -208,8 +208,14 @@ function HoldManagement({ mission, state, isLaunchDirector }: { mission: Mission
                     }}
                     className={`relative h-4 w-8 shrink-0 rounded-full transition-colors ${activeHold.autoProceed ? "bg-aat-accent" : "bg-slate-600"}`}
                   >
+                    {/* v5.0 Item 1 - explicit left-0.5 base position (rather
+                        than relying on the button's ambiguous CSS "left:
+                        auto" static-position, which rendered the knob on
+                        the wrong side and let it overflow past the track
+                        at the "on" position) makes both states fully
+                        deterministic and contained within the track. */}
                     <span
-                      className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${activeHold.autoProceed ? "translate-x-4" : "translate-x-0.5"}`}
+                      className={`absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${activeHold.autoProceed ? "translate-x-4" : "translate-x-0"}`}
                     />
                   </button>
                   <span className={activeHold.autoProceed ? "font-semibold text-aat-accent" : "text-slate-500"}>Auto-Proceed</span>

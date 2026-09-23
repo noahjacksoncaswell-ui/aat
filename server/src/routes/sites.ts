@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { SiteStatus, SiteType, SiteOwnership } from "@prisma/client";
 import { prisma } from "../lib/prisma";
-import { requireAdmin } from "../middleware/auth";
+import { requireAdmin, requireLaunchDirector } from "../middleware/auth";
 import { recordAudit } from "../services/audit";
 import { getWeatherForSite } from "../services/weather";
 import { computeCoaStatus } from "../services/faa";
@@ -82,6 +82,23 @@ const siteSchema = z.object({
   traconPhone: z.string().optional().nullable(),
   artccFacilityName: z.string().optional().nullable(),
   artccPhone: z.string().optional().nullable(),
+  otherFacilityName: z.string().optional().nullable(),
+  otherFacilityPhone: z.string().optional().nullable(),
+  otherFacilityNotApplicable: z.boolean().optional(),
+});
+
+// v5.0 Section 5 - Facility Notification Contacts (TRACON, ARTCC, Other)
+// are operational contact data a Launch Director needs to keep current
+// day-to-day, distinct from the structural site fields above (name,
+// coordinates, ownership, etc.) which stay Admin-only via PATCH /:id.
+const facilityContactsSchema = z.object({
+  traconFacilityName: z.string().optional().nullable(),
+  traconPhone: z.string().optional().nullable(),
+  artccFacilityName: z.string().optional().nullable(),
+  artccPhone: z.string().optional().nullable(),
+  otherFacilityName: z.string().optional().nullable(),
+  otherFacilityPhone: z.string().optional().nullable(),
+  otherFacilityNotApplicable: z.boolean().optional(),
 });
 
 router.post("/", requireAdmin, async (req, res) => {
@@ -97,6 +114,17 @@ router.patch("/:id", requireAdmin, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const site = await prisma.site.update({ where: { id: req.params.id }, data: parsed.data });
   await recordAudit({ userId: req.user!.id, action: "SITE_UPDATED", targetType: "Site", targetId: site.id, metadata: parsed.data });
+  res.json(site);
+});
+
+// v5.0 Section 5 - Facility Notification Contacts. LD+Admin (not
+// Admin-only like the general site PATCH above) since Launch Directors
+// are the ones who need to keep this operational contact data current.
+router.patch("/:id/facility-contacts", requireLaunchDirector, async (req, res) => {
+  const parsed = facilityContactsSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const site = await prisma.site.update({ where: { id: req.params.id }, data: parsed.data });
+  await recordAudit({ userId: req.user!.id, action: "SITE_FACILITY_CONTACTS_UPDATED", targetType: "Site", targetId: site.id, metadata: parsed.data });
   res.json(site);
 });
 

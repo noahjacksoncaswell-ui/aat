@@ -19,6 +19,7 @@ import {
   targetLaunchOpportunity,
   updateGoNoGo,
   updateLaunchDayNotification,
+  updateSiteFacilityContacts,
   uploadDocument,
 } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
@@ -29,7 +30,7 @@ import { useMissionSocket } from "../hooks/useSocket";
 import PersistentClockHeader from "../components/PersistentClockHeader";
 import CountdownTab from "../components/CountdownTab";
 import LwccTab from "../components/LwccTab";
-import type { NotificationType } from "../types";
+import type { NotificationType, Site } from "../types";
 import { DISPOSITION_OUTCOMES } from "../types";
 
 const TABS = ["Overview", "Countdown", "Polls", "FAA & NOTAM", "Log", "History", "LWCC"] as const;
@@ -897,6 +898,160 @@ const NOTIFICATION_LABELS: Record<NotificationType, string> = {
   TERMINATION: "Termination: airspace clear confirmation",
 };
 
+// v5.0 Section 5 - was "Facility Cross-Reference": read-only, populated only
+// for whichever mission happened to have seed data, and hidden entirely for
+// every other mission (the box only rendered when TRACON/ARTCC data was
+// already present). This data belongs to the site, not the mission (so
+// entering it once covers every mission at that site), and is now always
+// visible with inline view/edit/delete for TRACON, ARTCC, and Other.
+function FacilityNotificationContactsBox({ site }: { site: Site }) {
+  const qc = useQueryClient();
+  const { isLaunchDirector } = useAuth();
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    traconFacilityName: site.traconFacilityName ?? "",
+    traconPhone: site.traconPhone ?? "",
+    artccFacilityName: site.artccFacilityName ?? "",
+    artccPhone: site.artccPhone ?? "",
+    otherFacilityName: site.otherFacilityName ?? "",
+    otherFacilityPhone: site.otherFacilityPhone ?? "",
+    otherFacilityNotApplicable: site.otherFacilityNotApplicable ?? false,
+  });
+
+  const mutation = useMutation({
+    mutationFn: () => updateSiteFacilityContacts(site.id, form as any),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["mission"] });
+      qc.invalidateQueries({ queryKey: ["sites"] });
+      qc.invalidateQueries({ queryKey: ["site", site.id] });
+      setEditing(false);
+    },
+  });
+
+  function startEditing() {
+    setForm({
+      traconFacilityName: site.traconFacilityName ?? "",
+      traconPhone: site.traconPhone ?? "",
+      artccFacilityName: site.artccFacilityName ?? "",
+      artccPhone: site.artccPhone ?? "",
+      otherFacilityName: site.otherFacilityName ?? "",
+      otherFacilityPhone: site.otherFacilityPhone ?? "",
+      otherFacilityNotApplicable: site.otherFacilityNotApplicable ?? false,
+    });
+    setEditing(true);
+  }
+
+  function clearContact(prefix: "tracon" | "artcc" | "other") {
+    if (prefix === "tracon") setForm({ ...form, traconFacilityName: "", traconPhone: "" });
+    else if (prefix === "artcc") setForm({ ...form, artccFacilityName: "", artccPhone: "" });
+    else setForm({ ...form, otherFacilityName: "", otherFacilityPhone: "" });
+  }
+
+  return (
+    <section className="card p-5 lg:col-span-2">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Facility Notification Contacts</div>
+        {isLaunchDirector && !editing && (
+          <button onClick={startEditing} className="text-xs font-semibold text-aat-accent hover:underline">
+            Edit
+          </button>
+        )}
+      </div>
+
+      {!editing ? (
+        <div className="grid grid-cols-3 gap-3 text-sm">
+          <Field label="TRACON" value={site.traconFacilityName ? `${site.traconFacilityName}${site.traconPhone ? ` — ${site.traconPhone}` : ""}` : "--"} />
+          <Field label="ARTCC" value={site.artccFacilityName ? `${site.artccFacilityName}${site.artccPhone ? ` — ${site.artccPhone}` : ""}` : "--"} />
+          <Field
+            label="Other"
+            value={
+              site.otherFacilityNotApplicable
+                ? "N/A"
+                : site.otherFacilityName
+                  ? `${site.otherFacilityName}${site.otherFacilityPhone ? ` — ${site.otherFacilityPhone}` : ""}`
+                  : "--"
+            }
+          />
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            {(
+              [
+                ["tracon", "TRACON", "traconFacilityName", "traconPhone"],
+                ["artcc", "ARTCC", "artccFacilityName", "artccPhone"],
+              ] as const
+            ).map(([prefix, label, nameKey, phoneKey]) => (
+              <div key={prefix} className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+                  {(form[nameKey] || form[phoneKey]) && (
+                    <button onClick={() => clearContact(prefix)} className="text-[10px] font-semibold text-aat-nogo hover:underline">
+                      Delete
+                    </button>
+                  )}
+                </div>
+                <input
+                  placeholder="Facility name"
+                  value={form[nameKey]}
+                  onChange={(e) => setForm({ ...form, [nameKey]: e.target.value })}
+                  className="input"
+                />
+                <input
+                  placeholder="Phone number"
+                  value={form[phoneKey]}
+                  onChange={(e) => setForm({ ...form, [phoneKey]: e.target.value })}
+                  className="input"
+                />
+              </div>
+            ))}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Other</div>
+                {(form.otherFacilityName || form.otherFacilityPhone) && (
+                  <button onClick={() => clearContact("other")} className="text-[10px] font-semibold text-aat-nogo hover:underline">
+                    Delete
+                  </button>
+                )}
+              </div>
+              <input
+                placeholder="Facility name"
+                value={form.otherFacilityName}
+                onChange={(e) => setForm({ ...form, otherFacilityName: e.target.value })}
+                disabled={form.otherFacilityNotApplicable}
+                className="input disabled:opacity-40"
+              />
+              <input
+                placeholder="Phone number"
+                value={form.otherFacilityPhone}
+                onChange={(e) => setForm({ ...form, otherFacilityPhone: e.target.value })}
+                disabled={form.otherFacilityNotApplicable}
+                className="input disabled:opacity-40"
+              />
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={form.otherFacilityNotApplicable}
+                  onChange={(e) => setForm({ ...form, otherFacilityNotApplicable: e.target.checked })}
+                />
+                Not applicable
+              </label>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setEditing(false)} className="btn-secondary">
+              Cancel
+            </button>
+            <button onClick={() => mutation.mutate()} disabled={mutation.isPending} className="btn-primary disabled:opacity-50">
+              Save
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function FaaTab({ missionId, targeted, useZulu }: { missionId: string; targeted: any; useZulu: boolean }) {
   const { isLaunchDirector } = useAuth();
   const qc = useQueryClient();
@@ -904,16 +1059,26 @@ function FaaTab({ missionId, targeted, useZulu }: { missionId: string; targeted:
   const { data: notifications } = useQuery({ queryKey: ["notifications", missionId], queryFn: () => fetchLaunchDayNotifications(missionId) });
   const { data: mission } = useQuery({ queryKey: ["mission", missionId], queryFn: () => fetchMission(missionId) });
   const [notamForm, setNotamForm] = useState({ leidosConfirmationNumber: "", notamWindowOpen: "", notamWindowClose: "" });
+  // v5.0 Item 6 - Log NOTAM Filing requires a confirmation step, and must
+  // validate required fields aren't blank before that confirmation can proceed.
+  const [confirmingNotam, setConfirmingNotam] = useState(false);
+  const notamFormValid = Boolean(
+    notamForm.leidosConfirmationNumber.trim() && notamForm.notamWindowOpen && notamForm.notamWindowClose
+  );
 
   const fileNotamMutation = useMutation({
     mutationFn: () =>
       fileNotam(missionId, {
         filedDate: new Date().toISOString(),
         leidosConfirmationNumber: notamForm.leidosConfirmationNumber,
-        notamWindowOpen: notamForm.notamWindowOpen ? new Date(notamForm.notamWindowOpen).toISOString() : new Date().toISOString(),
-        notamWindowClose: notamForm.notamWindowClose ? new Date(notamForm.notamWindowClose).toISOString() : new Date().toISOString(),
+        notamWindowOpen: new Date(notamForm.notamWindowOpen).toISOString(),
+        notamWindowClose: new Date(notamForm.notamWindowClose).toISOString(),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["notam", missionId] }),
+    onSuccess: () => {
+      setConfirmingNotam(false);
+      setNotamForm({ leidosConfirmationNumber: "", notamWindowOpen: "", notamWindowClose: "" });
+      qc.invalidateQueries({ queryKey: ["notam", missionId] });
+    },
   });
 
   const isTargetedToday = targeted && new Date(targeted.date).toDateString() === new Date().toDateString();
@@ -921,15 +1086,7 @@ function FaaTab({ missionId, targeted, useZulu }: { missionId: string; targeted:
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      {site && (site.traconFacilityName || site.artccFacilityName) && (
-        <section className="card p-5 lg:col-span-2">
-          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Facility Cross-Reference</div>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <Field label="TRACON" value={site.traconFacilityName ? `${site.traconFacilityName}${site.traconPhone ? ` — ${site.traconPhone}` : ""}` : "--"} />
-            <Field label="ARTCC" value={site.artccFacilityName ? `${site.artccFacilityName}${site.artccPhone ? ` — ${site.artccPhone}` : ""}` : "--"} />
-          </div>
-        </section>
-      )}
+      {site && <FacilityNotificationContactsBox site={site} />}
 
       <section className="card p-5">
         <div className="mb-2 flex items-center justify-between">
@@ -952,7 +1109,7 @@ function FaaTab({ missionId, targeted, useZulu }: { missionId: string; targeted:
         ) : (
           <p className="text-sm text-slate-500 dark:text-slate-400">Not yet filed.</p>
         )}
-        {isLaunchDirector && (
+        {isLaunchDirector && !confirmingNotam && (
           <div className="mt-3 space-y-2">
             <input
               placeholder="Leidos confirmation number"
@@ -974,9 +1131,39 @@ function FaaTab({ missionId, targeted, useZulu }: { missionId: string; targeted:
                 className="input"
               />
             </div>
-            <button onClick={() => fileNotamMutation.mutate()} className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-black">
+            {!notamFormValid && (
+              <p className="text-xs text-aat-nogo">
+                Confirmation number and both NOTAM window fields are required before filing can be logged.
+              </p>
+            )}
+            <button
+              onClick={() => setConfirmingNotam(true)}
+              disabled={!notamFormValid}
+              className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-black disabled:opacity-40"
+            >
               Log NOTAM Filing
             </button>
+          </div>
+        )}
+        {isLaunchDirector && confirmingNotam && (
+          <div className="mt-3 space-y-2 rounded-md border border-slate-300 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+            <p className="text-xs">
+              Confirm NOTAM filing — Ref: <strong>{notamForm.leidosConfirmationNumber}</strong>, window{" "}
+              <strong>{formatTimestamp(new Date(notamForm.notamWindowOpen).toISOString(), useZulu)}</strong> –{" "}
+              <strong>{formatTimestamp(new Date(notamForm.notamWindowClose).toISOString(), useZulu)}</strong>.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmingNotam(false)} className="btn-secondary px-3 py-1.5 text-xs">
+                Back
+              </button>
+              <button
+                onClick={() => fileNotamMutation.mutate()}
+                disabled={fileNotamMutation.isPending}
+                className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-black disabled:opacity-50"
+              >
+                Confirm Log NOTAM Filing
+              </button>
+            </div>
           </div>
         )}
       </section>
@@ -998,17 +1185,24 @@ function ChecklistItem({ missionId, item, isLaunchDirector, useZulu }: any) {
   const qc = useQueryClient();
   const [facility, setFacility] = useState(item.contactedFacility || "");
   const [notes, setNotes] = useState(item.notes || "");
+  // v5.0 Item 6 - Log completion requires a confirmation step before it
+  // submits; Mark not applicable is explicitly unchanged per the directive.
+  const [confirming, setConfirming] = useState(false);
   const mutation = useMutation({
     mutationFn: (data: any) => updateLaunchDayNotification(missionId, item.notificationType, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications", missionId] }),
+    onSuccess: () => {
+      setConfirming(false);
+      qc.invalidateQueries({ queryKey: ["notifications", missionId] });
+    },
   });
 
   const done = item.satisfied || item.notApplicable;
+  const label = NOTIFICATION_LABELS[item.notificationType as NotificationType];
 
   return (
     <div className={`rounded-md border p-3 text-sm ${done ? "border-aat-go/50 bg-aat-go/5" : "border-slate-200 dark:border-slate-800"}`}>
       <div className="flex items-center justify-between">
-        <span className="font-medium">{NOTIFICATION_LABELS[item.notificationType as NotificationType]}</span>
+        <span className="font-medium">{label}</span>
         {done ? (
           <StatusPill tone="go">{item.notApplicable ? "N/A" : "Satisfied"}</StatusPill>
         ) : (
@@ -1021,15 +1215,12 @@ function ChecklistItem({ missionId, item, isLaunchDirector, useZulu }: any) {
           {item.notes ? ` · ${item.notes}` : ""}
         </div>
       )}
-      {!done && isLaunchDirector && (
+      {!done && isLaunchDirector && !confirming && (
         <div className="mt-2 space-y-2">
           <input placeholder="Contacted facility" value={facility} onChange={(e) => setFacility(e.target.value)} className="input" />
           <input placeholder="Notes / confirmation" value={notes} onChange={(e) => setNotes(e.target.value)} className="input" />
           <div className="flex gap-2">
-            <button
-              onClick={() => mutation.mutate({ satisfied: true, contactedFacility: facility, notes })}
-              className="rounded-md bg-aat-go px-3 py-1.5 text-xs font-semibold text-white"
-            >
+            <button onClick={() => setConfirming(true)} className="rounded-md bg-aat-go px-3 py-1.5 text-xs font-semibold text-white">
               Log completion
             </button>
             <button
@@ -1037,6 +1228,34 @@ function ChecklistItem({ missionId, item, isLaunchDirector, useZulu }: any) {
               className="rounded-md border border-slate-300 px-3 py-1.5 text-xs dark:border-slate-700"
             >
               Mark not applicable
+            </button>
+          </div>
+        </div>
+      )}
+      {!done && isLaunchDirector && confirming && (
+        <div className="mt-2 space-y-2 rounded-md border border-aat-go/40 bg-aat-go/5 p-2">
+          <p className="text-xs">
+            Confirm completion of <strong>{label}</strong>
+            {facility ? (
+              <>
+                {" "}
+                — contacted <strong>{facility}</strong>
+              </>
+            ) : (
+              " with no contacted facility recorded"
+            )}
+            {notes ? ` (${notes})` : ""}.
+          </p>
+          <div className="flex gap-2">
+            <button onClick={() => setConfirming(false)} className="btn-secondary px-3 py-1.5 text-xs">
+              Back
+            </button>
+            <button
+              onClick={() => mutation.mutate({ satisfied: true, contactedFacility: facility, notes })}
+              disabled={mutation.isPending}
+              className="rounded-md bg-aat-go px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              Confirm Log Completion
             </button>
           </div>
         </div>

@@ -42,6 +42,9 @@ export interface Site {
   traconPhone?: string | null;
   artccFacilityName?: string | null;
   artccPhone?: string | null;
+  otherFacilityName?: string | null;
+  otherFacilityPhone?: string | null;
+  otherFacilityNotApplicable?: boolean;
   coaStatus?: CoaComputedStatus;
   landownerAuthorizationStatus?: LandownerAuthorizationStatus;
   photos?: SitePhoto[];

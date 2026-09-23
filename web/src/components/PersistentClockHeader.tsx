@@ -100,7 +100,7 @@ export default function PersistentClockHeader({ mission }: { mission: Mission })
 
   let launchValue: string;
   if (!state?.lot) {
-    launchValue = "PENDING";
+    launchValue = "PENDING (NO LOT SET)";
   } else if (liftoffComplete) {
     launchValue = "LIFTOFF CONFIRMED";
   } else if (unscheduledHoldActive) {
@@ -117,7 +117,7 @@ export default function PersistentClockHeader({ mission }: { mission: Mission })
         <ClockCell
           label="Window Clock"
           sublabel="Launch opportunity window"
-          value={targeted ? windowCountdown!.text : "PENDING (NO TARGETED LAUNCH OPPORTUNITY)"}
+          value={targeted ? windowCountdown!.text : "PENDING (NO TLO SEL)"}
         />
         <TargetSubBox value={targeted ? formatTimestamp(targeted.windowOpen, useZulu) : "--"} />
       </div>
@@ -132,7 +132,7 @@ export default function PersistentClockHeader({ mission }: { mission: Mission })
           }
           value={
             !state || state.tCountStatus === "PENDING"
-              ? "PENDING"
+              ? "PENDING (NO LOT SET)"
               : state.tCountStatus === "COMPLETE" && state.liftoffActualTime
                 ? formatMet(state.liftoffActualTime, now)
                 : formatTMinus(tMinus)
