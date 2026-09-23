@@ -8,6 +8,14 @@ import { recordAudit } from "../services/audit";
 import { broadcastMissionUpdate } from "../websocket";
 import { computeTCountSeconds, computeProjectedLiftoff } from "../services/countdown";
 import { COUNTDOWN_MILESTONE_SEQUENCE } from "../services/countdownSequence";
+import { computeCoaStatus } from "../services/faa";
+import {
+  COMR_DOCUMENT_CATEGORY,
+  COFR_DOCUMENT_CATEGORY,
+  COFR_COMPLIANCE_WINDOW_HOURS,
+  LOT_CERTIFICATION_TEXTS,
+  validateDailyOperationalWindow,
+} from "../services/lotCertification";
 
 const router = Router({ mergeParams: true });
 const requireConsole = requireRole(Role.ADMIN, Role.LAUNCH_DIRECTOR, Role.OPERATOR);
@@ -54,11 +62,16 @@ router.get("/state", async (req, res) => {
 
 const lotSchema = z.object({
   lot: z.string(),
-  vehicleReadinessNotes: z.string().optional().nullable(),
-  rangeAvailabilityNotes: z.string().optional().nullable(),
-  meteorologicalOutlookNotes: z.string().optional().nullable(),
-  scheduleConstraintsNotes: z.string().optional().nullable(),
-  safetyRegulatoryNotes: z.string().optional().nullable(),
+  comrDocumentId: z.string().min(1, "A Certification of Mission Readiness (CoMR) document must be selected"),
+  // All eight certification statements are individually required; the
+  // client sends which of the eight fixed statements (by index) the user
+  // affirmed, and the server rejects unless all eight are true. The exact
+  // verbatim text is never taken from the client - it is always the
+  // server's own LOT_CERTIFICATION_TEXTS - so what gets stored as "the text
+  // affirmed" can never drift from the governing statements.
+  certifications: z.array(z.boolean()).length(8, "All eight certification statements must be present"),
+  signatureName: z.string().min(1, "Typed full legal name is required"),
+  signatureRole: z.string().min(1, "Role is required"),
 });
 
 function validateLotWindow(lot: Date, targeted: { windowOpen: Date; windowClose: Date } | undefined) {
@@ -69,11 +82,23 @@ function validateLotWindow(lot: Date, targeted: { windowOpen: Date; windowClose:
   return null;
 }
 
+// v5.0 Section 7 - full LOT Submission rebuild, governed by the reference
+// MOP (IRM2-MOP-001A Section 5): only launch date/time is load-bearing from
+// the old form; the five free-text constraint fields are gone, replaced by
+// a mandatory CoMR selection, eight verbatim certification statements, and
+// an e-signature of record, all stored permanently in LotCertification.
 router.post("/lot", requireLaunchDirector, async (req, res) => {
   const parsed = lotSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const mission = await loadMissionWithHolds(missionId(req));
+  if (parsed.data.certifications.some((affirmed) => !affirmed)) {
+    return res.status(400).json({ error: "All eight certification statements must be affirmed before the LOT can be submitted" });
+  }
+
+  const mission = await prisma.mission.findUnique({
+    where: { id: missionId(req) },
+    include: { launchPeriodEntries: true, holds: true, site: { include: { coas: true } } },
+  });
   if (!mission) return res.status(404).json({ error: "Mission not found" });
   if (mission.status !== MissionStatus.TARGETED) {
     return res.status(400).json({ error: "LOT can only be submitted once a Target Launch Opportunity is confirmed" });
@@ -87,39 +112,126 @@ router.post("/lot", requireLaunchDirector, async (req, res) => {
   const windowError = validateLotWindow(lot, targeted);
   if (windowError) return res.status(400).json({ error: windowError });
 
-  // Request/response field names stay unprefixed (matching the frontend
-  // form and the wire contract); only the Mission model's columns carry the
-  // `lot`-prefix, so the mapping happens here, once, rather than renaming
-  // either side of the API.
-  const {
-    vehicleReadinessNotes,
-    rangeAvailabilityNotes,
-    meteorologicalOutlookNotes,
-    scheduleConstraintsNotes,
-    safetyRegulatoryNotes,
-  } = parsed.data;
+  // v5.0 Section 7.3 - corrected validation: the LOT must ALSO fall within
+  // the site's active COA's Daily Operational Window, read directly off the
+  // COA record (not re-entered on the form).
+  const activeCoa = mission.site.coas.find((c) => computeCoaStatus(c) === "ACTIVE");
+  if (!activeCoa) {
+    return res.status(400).json({ error: "Site has no active Certificate of Waiver or Authorization (COA) on file" });
+  }
+  const dailyWindowError = validateDailyOperationalWindow(lot, activeCoa.dailyWindowOpen, activeCoa.dailyWindowClose);
+  if (dailyWindowError) return res.status(400).json({ error: dailyWindowError });
+
+  // v5.0 Section 7.4 - CoMR must exist and be tagged with the CoMR category.
+  const comrDoc = await prisma.document.findUnique({ where: { id: parsed.data.comrDocumentId } });
+  if (!comrDoc || comrDoc.category !== COMR_DOCUMENT_CATEGORY) {
+    return res.status(400).json({ error: "Selected document is not a valid Certification of Mission Readiness (CoMR)" });
+  }
+
+  // Checkbox 8 - basis is determined automatically, not self-reported: if a
+  // CoFR document is already on file for the assigned vehicle the
+  // attestation is satisfied outright; otherwise the 24-hour compliance
+  // deadline gate (Section 7.4) starts running from this LOT.
+  const cofrDoc = await prisma.document.findFirst({ where: { category: COFR_DOCUMENT_CATEGORY, vehicleId: mission.vehicleId } });
+  const cofrBasis = cofrDoc ? "APPROVED_ON_FILE" : "WILL_FILE_WITHIN_24H";
+  const cofrComplianceDeadline = cofrDoc ? null : new Date(lot.getTime() - COFR_COMPLIANCE_WINDOW_HOURS * 60 * 60 * 1000);
+
+  const certifications = LOT_CERTIFICATION_TEXTS.map((text, i) => ({ no: i + 1, text }));
+  const logText = `LOT submitted: ${lot.toISOString()} — CoMR: "${comrDoc.title}". Signed by ${parsed.data.signatureName} (${parsed.data.signatureRole}).`;
 
   await prisma.$transaction(async (tx) => {
     await tx.mission.update({
       where: { id: mission.id },
+      data: { lot, lotSubmittedAt: new Date(), tCountStatus: "COUNTING", holdOffsetSeconds: 0 },
+    });
+    await tx.lotCertification.create({
       data: {
-        lot,
-        lotSubmittedAt: new Date(),
-        tCountStatus: "COUNTING",
-        holdOffsetSeconds: 0,
-        lotVehicleReadinessNotes: vehicleReadinessNotes,
-        lotRangeAvailabilityNotes: rangeAvailabilityNotes,
-        lotMeteorologicalOutlookNotes: meteorologicalOutlookNotes,
-        lotScheduleConstraintsNotes: scheduleConstraintsNotes,
-        lotSafetyRegulatoryNotes: safetyRegulatoryNotes,
+        missionId: mission.id,
+        comrDocumentId: comrDoc.id,
+        certifications,
+        signatureName: parsed.data.signatureName,
+        signatureRole: parsed.data.signatureRole,
+        signedById: req.user!.id,
+        cofrBasis,
+        cofrComplianceDeadline,
       },
     });
     await tx.missionHistoryEvent.create({
       data: { missionId: mission.id, eventType: MissionHistoryEventType.LOT_SUBMITTED, actorId: req.user!.id, notes: `LOT established: ${lot.toISOString()}` },
     });
+    // v5.0 Section 7.4 - auto-logged to the mission's Log tab; no separate
+    // manual log entry is required.
+    await tx.missionLogEntry.create({ data: { missionId: mission.id, authorId: req.user!.id, text: logText } });
   });
 
-  await recordAudit({ userId: req.user!.id, action: "LOT_SUBMITTED", targetType: "Mission", targetId: mission.id, metadata: { lot } });
+  await recordAudit({ userId: req.user!.id, action: "LOT_SUBMITTED", targetType: "Mission", targetId: mission.id, metadata: { lot, comrDocumentId: comrDoc.id, cofrBasis } });
+  broadcastMissionUpdate(mission.id);
+  res.status(204).send();
+});
+
+// v5.0 Section 7.4 - permanent CoMR/certification/signature record for the
+// mission's current LOT, viewable via Mission History.
+router.get("/lot/certification", async (req, res) => {
+  const certification = await prisma.lotCertification.findFirst({
+    where: { missionId: missionId(req) },
+    orderBy: { signedAt: "desc" },
+    include: { comrDocument: { select: { id: true, title: true, category: true } }, signedBy: { select: { id: true, name: true } } },
+  });
+  res.json(certification);
+});
+
+// v5.0 Section 7.4 - Launch Director confirms a CoFR document is now on
+// file for the assigned vehicle, resolving the compliance gate and
+// resuming T-Count. This is the ONLY way (besides Postpone Indefinitely) to
+// clear a CoFR compliance gate hold - the general-purpose Release Hold
+// action explicitly refuses it (see POST /holds/:holdId/release above).
+router.post("/cofr-gate/confirm", requireLaunchDirector, async (req, res) => {
+  const mission = await loadMissionWithHolds(missionId(req));
+  if (!mission) return res.status(404).json({ error: "Mission not found" });
+
+  const gateHold = mission.holds.find((h) => h.isCofrComplianceHold && h.status === "ACTIVE");
+  if (!gateHold || !gateHold.actualStartedAt) {
+    return res.status(400).json({ error: "No active CoFR compliance gate for this mission" });
+  }
+
+  const cofrDoc = await prisma.document.findFirst({ where: { category: COFR_DOCUMENT_CATEGORY, vehicleId: mission.vehicleId } });
+  if (!cofrDoc) {
+    return res.status(400).json({
+      error:
+        "No Certification of Flight Readiness document is on file for the assigned vehicle. Upload/tag one in the Documentation Library before confirming, or execute Postpone Indefinitely.",
+    });
+  }
+
+  const actualDurationSeconds = Math.round((Date.now() - gateHold.actualStartedAt.getTime()) / 1000);
+  const latestCert = await prisma.lotCertification.findFirst({ where: { missionId: mission.id, cofrGateHoldId: gateHold.id } });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.missionHold.update({
+      where: { id: gateHold.id },
+      data: { status: "RELEASED", actualEndedAt: new Date(), actualDurationSeconds },
+    });
+    await tx.mission.update({
+      where: { id: mission.id },
+      data: { tCountStatus: "COUNTING", holdOffsetSeconds: { increment: actualDurationSeconds } },
+    });
+    if (latestCert) {
+      await tx.lotCertification.update({
+        where: { id: latestCert.id },
+        data: { cofrGateResolvedAt: new Date(), cofrGateResolvedById: req.user!.id },
+      });
+    }
+    await tx.missionHistoryEvent.create({
+      data: {
+        missionId: mission.id,
+        eventType: MissionHistoryEventType.COFR_COMPLIANCE_RESOLVED,
+        actorId: req.user!.id,
+        notes: `CoFR confirmed on file ("${cofrDoc.title}"); countdown resumed after ${actualDurationSeconds}s blocked`,
+        metadata: { holdId: gateHold.id, actualDurationSeconds, cofrDocumentId: cofrDoc.id },
+      },
+    });
+  });
+
+  await recordAudit({ userId: req.user!.id, action: "COFR_COMPLIANCE_GATE_RESOLVED", targetType: "Mission", targetId: mission.id, metadata: { holdId: gateHold.id, actualDurationSeconds } });
   broadcastMissionUpdate(mission.id);
   res.status(204).send();
 });
@@ -283,6 +395,16 @@ router.post("/holds/:holdId/release", requireLaunchDirector, async (req, res) =>
   const hold = await prisma.missionHold.findUnique({ where: { id: req.params.holdId } });
   if (!hold || hold.missionId !== mId) return res.status(404).json({ error: "Hold not found" });
   if (hold.status !== "ACTIVE" || !hold.actualStartedAt) return res.status(400).json({ error: "Hold is not currently active" });
+  // v5.0 Section 7.4 - a CoFR compliance gate hold is a hard procedural
+  // gate, not an ordinary hold: it can only be cleared via POST
+  // .../cofr-gate/confirm (which validates a CoFR document actually exists)
+  // or Postpone Indefinitely, never the general-purpose Release Hold action.
+  if (hold.isCofrComplianceHold) {
+    return res.status(400).json({
+      error:
+        "This hold was raised by the CoFR compliance gate and cannot be released here. Confirm a Certification of Flight Readiness is now on file for the assigned vehicle, or execute Postpone Indefinitely.",
+    });
+  }
 
   const actualDurationSeconds = Math.round((Date.now() - hold.actualStartedAt.getTime()) / 1000);
 

@@ -2,6 +2,7 @@ import { Mission, MissionHold, MissionHistoryEventType } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { broadcastMissionUpdate } from "../websocket";
 import { computeTCountSeconds } from "./countdown";
+import { COFR_DOCUMENT_CATEGORY } from "./lotCertification";
 
 /**
  * Revision Directive v4.1 Item 1 [BLOCKING] - the previous hold-trigger
@@ -34,9 +35,12 @@ const TICK_MS = 1000;
 
 type MissionWithHolds = Mission & { holds: MissionHold[] };
 
-async function triggerNextScheduledHold(mission: MissionWithHolds): Promise<void> {
+// Returns true if a hold was triggered, so callers relying on the
+// (now-stale) in-memory `mission.holds` snapshot know not to treat the
+// mission as still hold-free for the rest of this tick.
+async function triggerNextScheduledHold(mission: MissionWithHolds): Promise<boolean> {
   const currentTMinus = computeTCountSeconds(mission, null);
-  if (currentTMinus == null) return;
+  if (currentTMinus == null) return false;
 
   // If several marks have somehow all been passed (e.g. the scheduler was
   // down), trigger the one closest to the current mark first - the next
@@ -45,7 +49,7 @@ async function triggerNextScheduledHold(mission: MissionWithHolds): Promise<void
     .filter((h) => h.status === "SCHEDULED" && h.holdMarkSeconds >= currentTMinus)
     .sort((a, b) => a.holdMarkSeconds - b.holdMarkSeconds);
   const hold = eligible[0];
-  if (!hold) return;
+  if (!hold) return false;
 
   await prisma.$transaction([
     prisma.missionHold.update({ where: { id: hold.id }, data: { status: "ACTIVE", actualStartedAt: new Date() } }),
@@ -60,6 +64,7 @@ async function triggerNextScheduledHold(mission: MissionWithHolds): Promise<void
     }),
   ]);
   broadcastMissionUpdate(mission.id);
+  return true;
 }
 
 async function maybeAutoReleaseHold(mission: MissionWithHolds): Promise<void> {
@@ -93,6 +98,66 @@ async function maybeAutoReleaseHold(mission: MissionWithHolds): Promise<void> {
   broadcastMissionUpdate(mission.id);
 }
 
+/**
+ * v5.0 Section 7.4 - hard procedural gate for LOT Submission certification
+ * checkbox 8. If the mission's current LOT was certified on the basis that
+ * a CoFR "will be filed" (no CoFR document was on file at submission time)
+ * and the 24-hour compliance deadline has now lapsed with still no CoFR
+ * document associated with the assigned vehicle, this raises a
+ * system-triggered unscheduled hold flagged `isCofrComplianceHold` so it
+ * cannot be cleared by the ordinary Release Hold action - only by
+ * confirming a CoFR is now on file (POST .../cofr-gate/confirm) or
+ * Postpone Indefinitely, per the directive's "must not auto-execute
+ * Postpone Indefinitely" / "explicit Launch Director action" requirement.
+ *
+ * Deliberately no-ops while another hold is already ACTIVE, to preserve
+ * the single-active-hold invariant the rest of the countdown system
+ * assumes; it re-checks on every subsequent tick, so the gate still fires
+ * the instant that hold clears if the deadline has already passed.
+ */
+async function maybeRaiseCofrComplianceGate(mission: MissionWithHolds): Promise<void> {
+  if (mission.holds.some((h) => h.status === "ACTIVE")) return;
+
+  const latestCert = await prisma.lotCertification.findFirst({
+    where: { missionId: mission.id, cofrBasis: "WILL_FILE_WITHIN_24H", cofrGateResolvedAt: null },
+    orderBy: { signedAt: "desc" },
+  });
+  if (!latestCert?.cofrComplianceDeadline) return;
+  if (Date.now() < latestCert.cofrComplianceDeadline.getTime()) return;
+
+  const cofrDoc = await prisma.document.findFirst({ where: { category: COFR_DOCUMENT_CATEGORY, vehicleId: mission.vehicleId } });
+  if (cofrDoc) return; // resolved organically; LD still confirms via cofr-gate/confirm to clear the record
+
+  const currentTMinus = computeTCountSeconds(mission, null) ?? 0;
+  const reason =
+    "CoFR compliance deadline lapsed - no Certification of Flight Readiness is on file for the assigned vehicle. Per LOT Certification checkbox 8, T-Count is blocked pending Launch Director action.";
+
+  await prisma.$transaction(async (tx) => {
+    const hold = await tx.missionHold.create({
+      data: {
+        missionId: mission.id,
+        type: "UNSCHEDULED",
+        holdMarkSeconds: Math.round(currentTMinus),
+        status: "ACTIVE",
+        actualStartedAt: new Date(),
+        isCofrComplianceHold: true,
+        reason,
+      },
+    });
+    await tx.mission.update({ where: { id: mission.id }, data: { tCountStatus: "HOLDING" } });
+    await tx.lotCertification.update({ where: { id: latestCert.id }, data: { cofrGateHoldId: hold.id, cofrGateLapsedAt: new Date() } });
+    await tx.missionHistoryEvent.create({
+      data: {
+        missionId: mission.id,
+        eventType: MissionHistoryEventType.COFR_COMPLIANCE_LAPSED,
+        notes: reason,
+        metadata: { holdId: hold.id, certificationId: latestCert.id },
+      },
+    });
+  });
+  broadcastMissionUpdate(mission.id);
+}
+
 async function tick(): Promise<void> {
   const missions = await prisma.mission.findMany({
     where: { lot: { not: null }, tCountStatus: { in: ["COUNTING", "HOLDING"] } },
@@ -102,7 +167,8 @@ async function tick(): Promise<void> {
   for (const mission of missions) {
     try {
       if (mission.tCountStatus === "COUNTING") {
-        await triggerNextScheduledHold(mission);
+        const holdTriggered = await triggerNextScheduledHold(mission);
+        if (!holdTriggered) await maybeRaiseCofrComplianceGate(mission);
       } else if (mission.tCountStatus === "HOLDING") {
         await maybeAutoReleaseHold(mission);
       }

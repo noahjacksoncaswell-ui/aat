@@ -7,6 +7,7 @@ import {
   addLogEntry,
   cancelMission,
   fetchLaunchDayNotifications,
+  fetchLotCertification,
   fetchMission,
   fetchNotamStatus,
   fetchSiteWeather,
@@ -123,7 +124,7 @@ export default function MissionDetail() {
           <FaaTab missionId={missionId!} targeted={targeted} useZulu={useZulu} />
         ))}
       {tab === "Log" && <LogTab mission={mission} missionId={missionId!} useZulu={useZulu} cancelledAt={cancelled ? cancelledAt : undefined} />}
-      {tab === "History" && <HistoryTab mission={mission} useZulu={useZulu} cancelledAt={cancelled ? cancelledAt : undefined} />}
+      {tab === "History" && <HistoryTab mission={mission} missionId={missionId!} useZulu={useZulu} cancelledAt={cancelled ? cancelledAt : undefined} />}
       {tab === "LWCC" &&
         (cancelled ? <LockdownNotice tabName="LWCC" cancelledAt={cancelledAt} useZulu={useZulu} /> : <LwccTab missionId={missionId!} site={mission.site} />)}
 
@@ -1309,10 +1310,55 @@ function LogTab({ mission, missionId, useZulu, cancelledAt }: any) {
   );
 }
 
-function HistoryTab({ mission, useZulu, cancelledAt }: any) {
+function HistoryTab({ mission, missionId, useZulu, cancelledAt }: any) {
+  const { data: certification } = useQuery({
+    queryKey: ["lotCertification", missionId],
+    queryFn: () => fetchLotCertification(missionId),
+  });
+
   return (
-    <div className="card mx-auto max-w-3xl p-5">
+    <div className="card mx-auto max-w-3xl space-y-6 p-5">
       {(cancelledAt || mission.status === "CANCELLED") && <ReadOnlyBanner cancelledAt={cancelledAt} useZulu={useZulu} />}
+
+      {certification && (
+        <div>
+          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            LOT Certification of Record (v5.0 Section 7.4)
+          </div>
+          <div className="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
+            <div className="mb-2 grid grid-cols-2 gap-2 text-xs">
+              <Field label="CoMR Document" value={certification.comrDocument?.title ?? "--"} />
+              <Field
+                label="CoFR Basis"
+                value={certification.cofrBasis === "APPROVED_ON_FILE" ? "Approved & on file at submission" : "To be filed within 24h of LOT"}
+              />
+            </div>
+            <div className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+              Digitally signed by <strong>{certification.signatureName}</strong> ({certification.signatureRole}) —{" "}
+              {formatTimestamp(certification.signedAt, useZulu)}
+            </div>
+            {certification.cofrGateLapsedAt && (
+              <div className="mb-2 rounded-md border border-aat-nogo/40 bg-aat-nogo/5 p-2 text-xs">
+                CoFR compliance deadline lapsed {formatTimestamp(certification.cofrGateLapsedAt, useZulu)}.{" "}
+                {certification.cofrGateResolvedAt
+                  ? `Resolved ${formatTimestamp(certification.cofrGateResolvedAt, useZulu)} by ${certification.cofrGateResolvedBy?.name ?? "--"}.`
+                  : "Unresolved — T-Count remains blocked."}
+              </div>
+            )}
+            <details className="mt-2">
+              <summary className="cursor-pointer text-xs font-semibold text-aat-accent">View all 8 certification statements as affirmed</summary>
+              <ol className="mt-2 space-y-2 text-xs text-slate-600 dark:text-slate-300">
+                {certification.certifications.map((c: any) => (
+                  <li key={c.no}>
+                    <strong>{c.no}.</strong> {c.text}
+                  </li>
+                ))}
+              </ol>
+            </details>
+          </div>
+        </div>
+      )}
+
       <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
         Mission History (append-only compliance record)
       </div>

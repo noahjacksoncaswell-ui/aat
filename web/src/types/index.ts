@@ -275,11 +275,32 @@ export interface MissionHold {
   estimatedDurationSeconds?: number | null;
   status: HoldStatus;
   autoProceed: boolean;
+  // v5.0 Section 7.4 - true only for the system-triggered hold raised when
+  // a LOT Certification's 24-hour CoFR compliance deadline lapses.
+  isCofrComplianceHold?: boolean;
   reason?: string | null;
   actualStartedAt?: string | null;
   actualEndedAt?: string | null;
   actualDurationSeconds?: number | null;
   enteredBy?: { id: string; name: string } | null;
+}
+
+// v5.0 Section 7.4 - permanent record produced by a LOT Submission.
+export interface LotCertification {
+  id: string;
+  missionId: string;
+  comrDocumentId: string;
+  comrDocument: { id: string; title: string; category: string };
+  certifications: { no: number; text: string }[];
+  signatureName: string;
+  signatureRole: string;
+  signedAt: string;
+  signedBy: { id: string; name: string };
+  cofrBasis: "APPROVED_ON_FILE" | "WILL_FILE_WITHIN_24H";
+  cofrComplianceDeadline?: string | null;
+  cofrGateLapsedAt?: string | null;
+  cofrGateResolvedAt?: string | null;
+  cofrGateResolvedBy?: { id: string; name: string } | null;
 }
 
 export interface CountdownState {
@@ -438,6 +459,25 @@ export interface DocumentRecord {
 // looks it up) stays in sync with its exact label here.
 export const LANDOWNER_AUTHORIZATION_CATEGORY = "Landowner Authorization [PC]";
 export const COA_DOCUMENT_CATEGORY = "Cert. of Waiver or Authorization [PC]";
+export const COMR_DOCUMENT_CATEGORY = "Certification of Mission Readiness (CoMR)";
+export const COFR_DOCUMENT_CATEGORY = "Certification of Flight Readiness (CoFR)";
+
+// v5.0 Section 7.4 - LOT Submission certification statements, quoted
+// verbatim from Revision Directive v5.0 Section 6 (modeled on IRM2-MOP-001A
+// Section 5). Must match server/src/services/lotCertification.ts exactly -
+// the server is the source of truth and stores its own copy of this text
+// regardless of what the client sends, but the form must present the same
+// wording the record will show.
+export const LOT_CERTIFICATION_TEXTS: string[] = [
+  "I certify that I have considered the current vehicle readiness status for this mission, including certification thereof under the applicable Certification of Flight Readiness (CoFR), in selecting this Targeted Launch Opportunity.",
+  "I certify that I have considered range availability, including personnel, facilities, and range safety resources, in selecting this Targeted Launch Opportunity.",
+  "I certify that I have considered the current and forecast meteorological conditions applicable to this Targeted Launch Opportunity, including the Launch Weather Commit Criteria (LWCC) governing this mission.",
+  "I certify that I have considered applicable schedule limitations and constraints, including range, facility, and personnel availability, in selecting this Targeted Launch Opportunity.",
+  "I certify that I have considered all applicable safety, operational, and regulatory constraints, including those imposed by 14 CFR Part 101, the site's Certificate of Waiver or Authorization (COA), and AAT internal procedures, in selecting this Targeted Launch Opportunity.",
+  "I certify that the Certification of Mission Readiness (CoMR) selected above is the correct and applicable CoMR for this specific mission and the Targeted Launch Opportunity being scheduled herein.",
+  "I certify that the launch date, launch window, and Targeted Lift-Off Time (LOT) selected herein are confirmed to be in accordance with, and fall within, the launch period and launch windows established in this mission's Mission Operations Plan (MOP), and that this Targeted Launch Opportunity selection is made in accordance with, and follows, the procedure set forth therein.",
+  "I attest that a Certification of Flight Readiness (CoFR) has been approved for the vehicle assigned to this mission, or that such CoFR will be filed no later than twenty-four (24) hours prior to the Targeted Lift-Off Time (LOT). I acknowledge and agree that if a Certification of Flight Readiness has not been approved and filed within this twenty-four (24) hour period, this mission shall be postponed indefinitely and new launch opportunities shall be scheduled in accordance with the Postpone Indefinitely process.",
+];
 
 // Full replacement per v4.1 Section 8.1, superseding the category list
 // established across v2.0/v3.0/v3.1: Range Safety Package, FTS

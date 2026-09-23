@@ -7,6 +7,7 @@ import {
   fetchDocuments,
   fetchMissions,
   fetchSites,
+  fetchVehicles,
   updateDocumentMeta,
   uploadDocument,
   uploadDocumentVersion,
@@ -53,6 +54,7 @@ export default function Documents() {
   });
   const { data: sites } = useQuery({ queryKey: ["sites"], queryFn: fetchSites });
   const { data: missions } = useQuery({ queryKey: ["missions", {}], queryFn: () => fetchMissions() });
+  const { data: vehicles } = useQuery({ queryKey: ["vehicles"], queryFn: fetchVehicles });
 
   return (
     <div className="flex h-full">
@@ -154,7 +156,7 @@ export default function Documents() {
       </div>
 
       {selectedId && <DocumentPanel id={selectedId} onClose={() => setSelectedId(null)} />}
-      {showUpload && <UploadModal onClose={() => setShowUpload(false)} sites={sites} missions={missions} />}
+      {showUpload && <UploadModal onClose={() => setShowUpload(false)} sites={sites} missions={missions} vehicles={vehicles} />}
     </div>
   );
 }
@@ -293,9 +295,9 @@ function DocumentPanel({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
-function UploadModal({ onClose, sites, missions }: { onClose: () => void; sites?: any[]; missions?: any[] }) {
+function UploadModal({ onClose, sites, missions, vehicles }: { onClose: () => void; sites?: any[]; missions?: any[]; vehicles?: any[] }) {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ title: "", category: DOCUMENT_CATEGORIES[0], siteId: "", missionId: "", tags: "" });
+  const [form, setForm] = useState({ title: "", category: DOCUMENT_CATEGORIES[0], siteId: "", missionId: "", vehicleId: "", tags: "" });
   const [file, setFile] = useState<File | null>(null);
 
   const mutation = useMutation({
@@ -306,6 +308,7 @@ function UploadModal({ onClose, sites, missions }: { onClose: () => void; sites?
       fd.append("category", form.category);
       if (form.siteId) fd.append("siteId", form.siteId);
       if (form.missionId) fd.append("missionId", form.missionId);
+      if (form.vehicleId) fd.append("vehicleId", form.vehicleId);
       if (form.tags) fd.append("tags", form.tags);
       return uploadDocument(fd);
     },
@@ -342,6 +345,14 @@ function UploadModal({ onClose, sites, missions }: { onClose: () => void; sites?
             {missions?.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
+              </option>
+            ))}
+          </select>
+          <select value={form.vehicleId} onChange={(e) => setForm({ ...form, vehicleId: e.target.value })} className="input">
+            <option value="">No associated vehicle</option>
+            {vehicles?.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
               </option>
             ))}
           </select>

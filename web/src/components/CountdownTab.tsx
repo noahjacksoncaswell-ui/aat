@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addProgrammedHold,
   callHold,
+  confirmCofrGate,
+  fetchCoas,
   fetchCountdownState,
   fetchDocuments,
   fetchMilestoneTemplateOptions,
@@ -22,6 +25,7 @@ import { useAuth } from "../context/AuthContext";
 import { usePreferences } from "../context/PreferencesContext";
 import { tickTMinusSeconds } from "../utils/countdownMath";
 import { DocumentLink } from "./DocumentLink";
+import { COMR_DOCUMENT_CATEGORY, LOT_CERTIFICATION_TEXTS } from "../types";
 import type { Mission, MissionHold } from "../types";
 
 function secondsToHms(totalSeconds: number): string {
@@ -73,9 +77,12 @@ export default function CountdownTab({ mission, onRequestScrub }: { mission: Mis
   return (
     <div className="space-y-6">
       {!state.lot ? (
-        <LotSubmissionForm missionId={mission.id} targeted={targeted} disabled={mission.status !== "TARGETED"} />
+        <LotSubmissionForm mission={mission} targeted={targeted} disabled={mission.status !== "TARGETED"} />
       ) : (
         <>
+          {state.activeHold?.status === "ACTIVE" && state.activeHold.isCofrComplianceHold && (
+            <CofrComplianceGateAlert mission={mission} hold={state.activeHold} />
+          )}
           <HoldManagement mission={mission} state={state} isLaunchDirector={isLaunchDirector} />
           <TimeControls mission={mission} state={state} onRequestScrub={onRequestScrub} />
         </>
@@ -87,22 +94,43 @@ export default function CountdownTab({ mission, onRequestScrub }: { mission: Mis
   );
 }
 
-function LotSubmissionForm({ missionId, targeted, disabled }: { missionId: string; targeted: any; disabled: boolean }) {
+// v5.0 Section 7 - full LOT Submission rebuild, governed by the reference
+// MOP (IRM2-MOP-001A Section 5). Only launch date/time is load-bearing from
+// the old form; the five free-text constraint boxes are gone, replaced by
+// a mandatory CoMR selection, eight verbatim certification statements
+// (checkbox 8 has real functional teeth - see the CoFR compliance gate
+// banner in HoldManagement below), and a typed e-signature of record.
+function LotSubmissionForm({ mission, targeted, disabled }: { mission: Mission; targeted: any; disabled: boolean }) {
   const qc = useQueryClient();
-  const [form, setForm] = useState({
-    lot: "",
-    vehicleReadinessNotes: "",
-    rangeAvailabilityNotes: "",
-    meteorologicalOutlookNotes: "",
-    scheduleConstraintsNotes: "",
-    safetyRegulatoryNotes: "",
+  const [lot, setLot] = useState("");
+  const [comrDocumentId, setComrDocumentId] = useState("");
+  const [certs, setCerts] = useState<boolean[]>(Array(8).fill(false));
+  const [signatureName, setSignatureName] = useState("");
+  const [signatureRole, setSignatureRole] = useState("");
+
+  const { data: comrDocs } = useQuery({
+    queryKey: ["documents", "comr"],
+    queryFn: () => fetchDocuments({ category: COMR_DOCUMENT_CATEGORY }),
   });
+  const { data: coas } = useQuery({ queryKey: ["coas", mission.siteId], queryFn: () => fetchCoas(mission.siteId) });
+  const activeCoa = coas?.find((c) => c.status === "ACTIVE");
+
+  const comrLibraryEmpty = comrDocs != null && comrDocs.length === 0;
+  const allCertsAffirmed = certs.every(Boolean);
+  const canSubmit = !disabled && !!lot && !!comrDocumentId && allCertsAffirmed && !!signatureName.trim() && !!signatureRole.trim() && !comrLibraryEmpty;
 
   const mutation = useMutation({
-    mutationFn: () => submitLot(missionId, { ...form, lot: new Date(form.lot).toISOString() }),
+    mutationFn: () =>
+      submitLot(mission.id, {
+        lot: new Date(lot).toISOString(),
+        comrDocumentId,
+        certifications: certs,
+        signatureName: signatureName.trim(),
+        signatureRole: signatureRole.trim(),
+      }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["countdown", missionId] });
-      qc.invalidateQueries({ queryKey: ["mission", missionId] });
+      qc.invalidateQueries({ queryKey: ["countdown", mission.id] });
+      qc.invalidateQueries({ queryKey: ["mission", mission.id] });
     },
   });
 
@@ -111,24 +139,105 @@ function LotSubmissionForm({ missionId, targeted, disabled }: { missionId: strin
       <div className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Targeted Lift-Off Time (LOT) Submission</div>
       <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
         Due no later than L-3 days. Must fall within the confirmed launch window
-        {targeted ? ` (${new Date(targeted.windowOpen).toISOString()} – ${new Date(targeted.windowClose).toISOString()})` : ""}.
+        {targeted ? ` (${new Date(targeted.windowOpen).toISOString()} – ${new Date(targeted.windowClose).toISOString()})` : ""}
+        {activeCoa ? ` and the site's active COA Daily Operational Window (${activeCoa.dailyWindowOpen}Z–${activeCoa.dailyWindowClose}Z)` : ""}.
       </p>
+
+      {comrLibraryEmpty && (
+        <div className="mb-3 rounded-md border border-aat-nogo/50 bg-aat-nogo/10 p-3 text-xs text-aat-nogo">
+          No Certification of Mission Readiness (CoMR) document exists in the Documentation Library. Upload and tag one with the "Certification of
+          Mission Readiness (CoMR)" category before a LOT can be submitted.{" "}
+          <Link to="/documents" className="font-semibold underline">
+            Go to Documentation Library
+          </Link>
+        </div>
+      )}
+
       <div className="space-y-3">
-        <input type="datetime-local" value={form.lot} onChange={(e) => setForm({ ...form, lot: e.target.value })} className="input" />
-        <textarea placeholder="Vehicle readiness / CoFR basis" value={form.vehicleReadinessNotes} onChange={(e) => setForm({ ...form, vehicleReadinessNotes: e.target.value })} className="input" rows={2} />
-        <textarea placeholder="Range availability" value={form.rangeAvailabilityNotes} onChange={(e) => setForm({ ...form, rangeAvailabilityNotes: e.target.value })} className="input" rows={2} />
-        <textarea placeholder="Meteorological outlook" value={form.meteorologicalOutlookNotes} onChange={(e) => setForm({ ...form, meteorologicalOutlookNotes: e.target.value })} className="input" rows={2} />
-        <textarea placeholder="Schedule constraints" value={form.scheduleConstraintsNotes} onChange={(e) => setForm({ ...form, scheduleConstraintsNotes: e.target.value })} className="input" rows={2} />
-        <textarea placeholder="Safety/regulatory constraints" value={form.safetyRegulatoryNotes} onChange={(e) => setForm({ ...form, safetyRegulatoryNotes: e.target.value })} className="input" rows={2} />
+        <input type="datetime-local" value={lot} onChange={(e) => setLot(e.target.value)} className="input" />
+
+        <div>
+          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Certification of Mission Readiness (CoMR)
+          </label>
+          <select value={comrDocumentId} onChange={(e) => setComrDocumentId(e.target.value)} disabled={comrLibraryEmpty} className="input disabled:opacity-40">
+            <option value="">Select the governing CoMR document...</option>
+            {comrDocs?.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.title}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-800">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Certification (all eight required)</div>
+          {LOT_CERTIFICATION_TEXTS.map((text, i) => (
+            <label key={i} className="flex items-start gap-2 text-xs">
+              <input
+                type="checkbox"
+                className="mt-0.5 shrink-0"
+                checked={certs[i]}
+                onChange={(e) => setCerts(certs.map((c, idx) => (idx === i ? e.target.checked : c)))}
+              />
+              <span>{text}</span>
+            </label>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <input placeholder="Typed full legal name" value={signatureName} onChange={(e) => setSignatureName(e.target.value)} className="input" />
+          <input placeholder="Role" value={signatureRole} onChange={(e) => setSignatureRole(e.target.value)} className="input" />
+        </div>
+        <p className="text-[11px] text-slate-400">
+          Digitally signed by the name and role entered above, timestamped at submission, as the e-signature of record.
+        </p>
       </div>
-      <button
-        onClick={() => mutation.mutate()}
-        disabled={disabled || !form.lot}
-        className="btn-primary mt-3 disabled:opacity-50"
-      >
+      <button onClick={() => mutation.mutate()} disabled={!canSubmit || mutation.isPending} className="btn-primary mt-3 disabled:opacity-50">
         Submit LOT
       </button>
       {mutation.isError && <p className="mt-2 text-xs text-aat-nogo">{(mutation.error as any)?.response?.data?.error ?? "Submission failed"}</p>}
+    </section>
+  );
+}
+
+// v5.0 Section 7.4 - mandatory, non-dismissible-without-action alert shown
+// whenever the mission's CoFR compliance gate has raised its system-
+// triggered hold. There are only two ways out: confirm a CoFR document is
+// now on file (which the backend independently verifies before releasing
+// the hold), or Postpone Indefinitely from the Overview tab - the button
+// here is a plain instruction, not a duplicate action, so there is exactly
+// one place Postpone Indefinitely can be executed from.
+function CofrComplianceGateAlert({ mission, hold }: { mission: Mission; hold: MissionHold }) {
+  const qc = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: () => confirmCofrGate(mission.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["countdown", mission.id] });
+      qc.invalidateQueries({ queryKey: ["mission", mission.id] });
+    },
+  });
+
+  return (
+    <section className="card border-2 border-aat-nogo bg-aat-nogo/10 p-5">
+      <div className="mb-1 text-sm font-bold uppercase tracking-wide text-aat-nogo">CoFR Compliance Deadline Lapsed — T-Count Blocked</div>
+      <p className="mb-3 text-xs text-slate-700 dark:text-slate-300">
+        This mission's LOT Certification checkbox 8 was affirmed on the basis that a Certification of Flight Readiness (CoFR) would be filed no later
+        than twenty-four (24) hours prior to LOT. That deadline has now lapsed with no CoFR document on file for the assigned vehicle (
+        {mission.vehicle.name}). Per the LOT Certification, further T-Count progression is blocked until the Launch Director either confirms a CoFR
+        document now exists, or executes Postpone Indefinitely.
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <button onClick={() => mutation.mutate()} disabled={mutation.isPending} className="btn-primary disabled:opacity-50">
+          Confirm CoFR Now On File &amp; Resume Countdown
+        </button>
+        <span className="text-xs text-slate-500 dark:text-slate-400">
+          — or, from the Overview tab, execute <strong>Postpone Indefinitely</strong>.
+        </span>
+      </div>
+      {mutation.isError && (
+        <p className="mt-2 text-xs font-semibold text-aat-nogo">{(mutation.error as any)?.response?.data?.error ?? "Could not resolve the gate"}</p>
+      )}
     </section>
   );
 }
@@ -221,10 +330,13 @@ function HoldManagement({ mission, state, isLaunchDirector }: { mission: Mission
                   <span className={activeHold.autoProceed ? "font-semibold text-aat-accent" : "text-slate-500"}>Auto-Proceed</span>
                 </label>
               )}
-              {isLaunchDirector && (
+              {isLaunchDirector && !activeHold.isCofrComplianceHold && (
                 <button onClick={() => releaseHoldMutation.mutate(activeHold.id)} className="btn-primary text-xs">
                   Proceed Through Hold
                 </button>
+              )}
+              {activeHold.isCofrComplianceHold && (
+                <span className="text-xs font-semibold text-aat-nogo">See CoFR Compliance alert above</span>
               )}
             </div>
           </div>

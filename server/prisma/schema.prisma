@@ -63,6 +63,17 @@ enum MissionHistoryEventType {
   RECYCLED
   LIFTOFF_MARKED
   NOTE
+  COFR_COMPLIANCE_LAPSED
+  COFR_COMPLIANCE_RESOLVED
+}
+
+// v5.0 Section 7.4 - basis for LOT Submission certification checkbox 8. Set
+// automatically at submission time by whether a CoFR-tagged Document is
+// already associated with the mission's assigned vehicle; WILL_FILE_WITHIN_24H
+// starts the 24-hour compliance deadline gate.
+enum CofrBasis {
+  APPROVED_ON_FILE
+  WILL_FILE_WITHIN_24H
 }
 
 enum MilestoneStatus {
@@ -173,6 +184,9 @@ model User {
   lwccOverrides      LwccOverride[]
   lwccLogEntries     LwccLogEntry[]
   dispositionAddenda MissionDispositionAddendum[]
+
+  lotCertificationsSigned   LotCertification[] @relation("LotCertificationSignedBy")
+  lotCertificationsResolved LotCertification[] @relation("LotCertificationCofrGateResolvedBy")
 
   @@index([role])
 }
@@ -396,13 +410,12 @@ model Mission {
   updatedAt          DateTime      @updatedAt
 
   // --- Targeted Lift-Off Time (LOT) / Section 6.2.2 ---
-  lot                           DateTime? // confirmed Targeted Lift-Off Time (Zulu)
-  lotSubmittedAt                DateTime?
-  lotVehicleReadinessNotes      String?
-  lotRangeAvailabilityNotes     String?
-  lotMeteorologicalOutlookNotes String?
-  lotScheduleConstraintsNotes   String?
-  lotSafetyRegulatoryNotes      String?
+  // v5.0 Section 7.2 - the five free-text constraint notes fields (vehicle
+  // readiness, range availability, meteorological outlook, schedule
+  // constraints, safety/regulatory constraints) are removed entirely,
+  // replaced by the CoMR-governed certification record in LotCertification.
+  lot            DateTime? // confirmed Targeted Lift-Off Time (Zulu)
+  lotSubmittedAt DateTime?
 
   // --- T-COUNT / P-COUNT state / Section 6.2.1 ---
   // T-COUNT (T-minus to `lot`) = (lot - now) + holdOffsetSeconds while COUNTING,
@@ -436,6 +449,7 @@ model Mission {
   lwccHolds              LwccHold[]
   lwccOverrides          LwccOverride[]
   lwccLogEntries         LwccLogEntry[]
+  lotCertifications      LotCertification[]
 
   @@index([status])
   @@index([siteId])
@@ -455,6 +469,13 @@ model MissionHold {
   // elapses; when false (default), it goes into DURATION ELAPSED / HOLD ELAPSED
   // overage and a Launch Director must press Proceed Through Hold.
   autoProceed              Boolean    @default(false)
+  // v5.0 Section 7.4 - true only for the system-triggered unscheduled hold
+  // raised when a LOT Certification's 24-hour CoFR compliance deadline
+  // lapses with no CoFR document on file. Distinguishes this hard
+  // procedural gate from an ordinary unscheduled hold so it cannot be
+  // cleared via the normal Release Hold action - only by confirming a CoFR
+  // document now exists (POST .../cofr-gate/confirm) or Postpone Indefinitely.
+  isCofrComplianceHold     Boolean    @default(false)
   reason                   String?
   actualStartedAt          DateTime?
   actualEndedAt            DateTime?
@@ -583,6 +604,50 @@ model MissionLogEntry {
   text      String
 
   @@index([missionId])
+}
+
+// v5.0 Section 7 - the permanent record produced by a LOT Submission: the
+// CoMR document that governed it, all eight certification statements as
+// affirmed (exact text, not just booleans), and the e-signature of record.
+// Append-only, like MissionHistoryEvent/MissionDispositionAddendum - a
+// mission's LOT can only be established once per submission cycle (POST
+// /lot rejects a second submission while `lot` is set), so the most recent
+// row for a mission is always the certification governing its current LOT;
+// prior rows (from a cycle ended by Postpone Indefinitely, which nulls
+// `lot` and allows a fresh submission) remain on file for Mission History.
+model LotCertification {
+  id             String   @id @default(uuid())
+  missionId      String
+  mission        Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  comrDocumentId String
+  comrDocument   Document @relation(fields: [comrDocumentId], references: [id])
+
+  // The eight certification statements (v5.0 Section 7.4), stored as
+  // submitted: [{ no: 1-8, text: "<exact verbatim statement>" }, ...].
+  // All eight are required to be affirmed before submission is accepted,
+  // so no separate boolean is stored per item - their presence here IS the
+  // affirmation record.
+  certifications Json
+
+  signatureName String
+  signatureRole String
+  signedAt      DateTime @default(now())
+  signedById    String
+  signedBy      User     @relation("LotCertificationSignedBy", fields: [signedById], references: [id])
+
+  // --- Checkbox 8 / CoFR compliance gate ---
+  cofrBasis              CofrBasis
+  cofrComplianceDeadline DateTime? // set only when cofrBasis = WILL_FILE_WITHIN_24H (LOT - 24h)
+  cofrGateHoldId         String? // the system-triggered MissionHold raised when the deadline lapsed
+  cofrGateLapsedAt       DateTime?
+  cofrGateResolvedAt     DateTime?
+  cofrGateResolvedById   String?
+  cofrGateResolvedBy     User?     @relation("LotCertificationCofrGateResolvedBy", fields: [cofrGateResolvedById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([missionId])
+  @@index([comrDocumentId])
 }
 
 // ---------------------------------------------------------------------------
@@ -739,8 +804,9 @@ model Document {
   uploadedAt     DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  versions DocumentVersion[]
-  auditLog DocumentAuditEntry[]
+  versions          DocumentVersion[]
+  auditLog          DocumentAuditEntry[]
+  lotCertifications LotCertification[]
 
   @@index([category])
   @@index([status])
