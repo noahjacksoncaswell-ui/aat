@@ -64,20 +64,19 @@ export default function Layout() {
               </NavLink>
             )}
           </nav>
-          {/* v5.4 Section 3 - substantially larger, stacked (not
-              side-by-side), each clock spanning ~60-70% of the sidebar's
-              available width and centered; the active-mode yellow outline
-              (aat-caution, the same token used on the Test/Launch Clocks)
-              is preserved on whichever clock is presently live sitewide. */}
-          <div className="space-y-3 border-t border-zinc-800 px-4 py-4">
-            <div className="space-y-2">
-              <div className={`mx-auto w-[65%] border px-2 py-2 text-center ${useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
-                <div className="text-[10px] uppercase tracking-wide text-zinc-500">UTC</div>
-                <div className="font-mono text-xl tabular-nums text-zinc-100">{utcTime}</div>
+          {/* Label inline before each time (UTC / LOC) instead of stacked
+              above it, so each clock is a single compact row - same time
+              font size as before, far less vertical space. Active-mode
+              yellow outline (aat-caution) preserved. */}
+          <div className="space-y-2 border-t border-zinc-800 px-4 py-3">
+            <div className="space-y-1.5">
+              <div className={`mx-auto flex w-[65%] items-baseline justify-center gap-2 border px-2 py-1 ${useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
+                <span className="text-[10px] uppercase tracking-wide text-zinc-500">UTC</span>
+                <span className="font-mono text-xl tabular-nums text-zinc-100">{utcTime}</span>
               </div>
-              <div className={`mx-auto w-[65%] border px-2 py-2 text-center ${!useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
-                <div className="text-[10px] uppercase tracking-wide text-zinc-500">Local</div>
-                <div className="font-mono text-xl tabular-nums text-zinc-100">{localTime}</div>
+              <div className={`mx-auto flex w-[65%] items-baseline justify-center gap-2 border px-2 py-1 ${!useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
+                <span className="text-[10px] uppercase tracking-wide text-zinc-500">LOC</span>
+                <span className="font-mono text-xl tabular-nums text-zinc-100">{localTime}</span>
               </div>
             </div>
             <button onClick={toggleZulu} className="w-full border border-zinc-700 px-2 py-1.5 text-left text-[11px] hover:bg-zinc-900">
