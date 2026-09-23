@@ -128,9 +128,42 @@ router.patch("/:id/facility-contacts", requireLaunchDirector, async (req, res) =
   res.json(site);
 });
 
-router.delete("/:id", requireAdmin, async (req, res) => {
-  const site = await prisma.site.update({ where: { id: req.params.id }, data: { status: SiteStatus.DECOMMISSIONED } });
-  await recordAudit({ userId: req.user!.id, action: "SITE_DECOMMISSIONED", targetType: "Site", targetId: site.id });
+// v6.0 Section 9 - a genuine hard delete, distinct from the status-only
+// decommission flow available via the site edit form's status field.
+// Blocked outright (per the directive's stated design philosophy) rather
+// than taught elsewhere to tolerate a missing site reference. Per an
+// explicit follow-up decision on this directive: blocks on ANY mission on
+// file for the site, not only non-closed-out ones - Mission.siteId is a
+// required field with no cascade, so a Cancelled/Successful mission left
+// on file would otherwise hit a foreign-key error on delete; the
+// resolution path is to individually Remove Mission (v4.0 Section 1.2,
+// itself only available once a mission is Cancelled) before the site can
+// be deleted, not a new cascade-delete path here.
+router.delete("/:id", requireLaunchDirector, async (req, res) => {
+  const site = await prisma.site.findUnique({
+    where: { id: req.params.id },
+    include: { coas: true, missions: { select: { id: true } } },
+  });
+  if (!site) return res.status(404).json({ error: "Site not found" });
+
+  const hasActiveCoa = site.coas.some((c) => computeCoaStatus(c) === "ACTIVE");
+  const hasAnyMission = site.missions.length > 0;
+  if (hasActiveCoa || hasAnyMission) {
+    return res.status(400).json({
+      error:
+        "This launch site cannot be deleted. An active COA and/or mission(s) are associated with this site. The COA must be marked inactive or deleted, and any associated mission(s) must be individually removed via the Remove Mission action before this site can be deleted.",
+    });
+  }
+
+  // Document.siteId is optional and already handled as such throughout the
+  // app (unlike Mission.siteId), so detaching rather than deleting these
+  // documents is a safe, non-destructive way to clear the one remaining
+  // non-cascading reference before the site row itself is removed.
+  await prisma.$transaction([
+    prisma.document.updateMany({ where: { siteId: site.id }, data: { siteId: null } }),
+    prisma.site.delete({ where: { id: site.id } }),
+  ]);
+  await recordAudit({ userId: req.user!.id, action: "SITE_DELETED", targetType: "Site", targetId: site.id });
   res.status(204).send();
 });
 

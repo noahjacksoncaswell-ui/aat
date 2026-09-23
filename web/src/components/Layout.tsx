@@ -7,11 +7,13 @@ import ClassificationFooter from "./ClassificationFooter";
 
 const navItems = [
   { to: "/", label: "Dashboard", end: true },
-  { to: "/sites", label: "Launch Sites & Weather" },
+  { to: "/sites", label: "Launch Sites" },
   { to: "/missions", label: "Mission Schedule" },
-  { to: "/vehicles", label: "Vehicles" },
   { to: "/faa", label: "FAA Coordination" },
   { to: "/documents", label: "Documentation Library" },
+  { to: "/vehicles", label: "Vehicles" },
+  // v6.0 Section 1 - positioned immediately above Range Ops Display.
+  { to: "/trajectory-sim", label: "Trajectory Simulations" },
   // v5.1 Section 2 - available to every role (a display surface, not a
   // control surface), positioned second-to-last, immediately before Admin.
   { to: "/range-ops", label: "Range Ops Display" },

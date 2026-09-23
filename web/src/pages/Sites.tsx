@@ -3,7 +3,7 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from "react-leaflet";
 import L from "leaflet";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { addSitePhoto, createSite, fetchCoas, fetchSite, fetchSiteWeather, fetchSites, updateSite } from "../api/resources";
+import { addSitePhoto, createSite, deleteSite, fetchCoas, fetchSite, fetchSiteWeather, fetchSites, updateSite } from "../api/resources";
 import type { Site } from "../types";
 import { usePreferences } from "../context/PreferencesContext";
 import { formatTimestamp } from "../utils/time";
@@ -155,12 +155,25 @@ function SiteDetailPanel({ siteId, onClose }: { siteId: string; onClose: () => v
   const { data: coas } = useQuery({ queryKey: ["coas", siteId], queryFn: () => fetchCoas(siteId) });
   const [photoUrl, setPhotoUrl] = useState("");
   const [editing, setEditing] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const addPhoto = useMutation({
     mutationFn: () => addSitePhoto(siteId, photoUrl),
     onSuccess: () => {
       setPhotoUrl("");
       qc.invalidateQueries({ queryKey: ["site", siteId] });
+    },
+  });
+
+  // v6.0 Section 9 - a genuine hard delete, distinct from setting status to
+  // Decommissioned via the edit form below. Server-side blocks it (with an
+  // explanatory error surfaced here) if an active COA or any mission is
+  // still on file for the site.
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteSite(siteId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sites"] });
+      onClose();
     },
   });
 
@@ -295,7 +308,44 @@ function SiteDetailPanel({ siteId, onClose }: { siteId: string; onClose: () => v
           </button>
           {editing && <EditSiteForm site={site} onDone={() => setEditing(false)} />}
         </RequireRole>
+
+        <RequireRole roles={["ADMIN", "LAUNCH_DIRECTOR"]}>
+          <button onClick={() => setShowDeleteConfirm(true)} className="mt-3 block text-xs font-semibold text-aat-nogo hover:underline">
+            Delete Site
+          </button>
+        </RequireRole>
       </div>
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-black p-6">
+            <h2 className="mb-2 text-lg font-bold text-aat-nogo">Delete Site — Irreversible</h2>
+            <p className="mb-4 text-sm text-slate-300">
+              This will permanently delete <strong>{site.name}</strong> ({site.designator}). This cannot be undone.
+            </p>
+            {deleteMutation.isError && (
+              <p className="mb-4 text-xs font-semibold text-aat-nogo">
+                {(deleteMutation.error as any)?.response?.data?.error ?? "Delete failed"}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm dark:border-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteMutation.mutate()}
+                disabled={deleteMutation.isPending}
+                className="rounded-md bg-aat-nogo px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {deleteMutation.isPending ? "Deleting..." : "Confirm Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
