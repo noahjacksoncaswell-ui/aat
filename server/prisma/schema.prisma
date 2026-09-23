@@ -672,7 +672,18 @@ model COA {
   dailyWindowOpen             String // daily operational window open, "HH:MM"
   dailyWindowClose            String // daily operational window close, "HH:MM"
   authorizedActivity          String
+  // v6.1 Item 6 - altitudeLimits remains the free-text narrative
+  // description (may describe a floor as well as a ceiling, and
+  // conditional/radius-qualified language, e.g. "Surface to FL300 within a
+  // 3nm radius"), but is NOT a reliable source for automatic numeric
+  // conversion (a value like "FL300" cannot be safely parsed from prose).
+  // altitudeLimitFt is the structured ceiling value, in feet, that anything
+  // needing to do math with this COA's vertical limit (the trajectory
+  // simulation's 3D cylinder height and 2D graph reference lines) must read
+  // - entered directly as a number at COA creation/edit time, never parsed
+  // from altitudeLimits.
   altitudeLimits              String
+  altitudeLimitFt             Float?
   conditions                  String // Standard and Special Provisions
   createdAt                   DateTime @default(now())
   updatedAt                   DateTime @updatedAt

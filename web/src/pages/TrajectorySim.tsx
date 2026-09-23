@@ -36,12 +36,7 @@ export default function TrajectorySim() {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-6 px-6 py-16 text-center">
       <img src="/logo.webp" alt="American Aerospace" className="h-16 w-auto" />
-      <div>
-        <h1 className="text-2xl font-bold uppercase tracking-wide">Trajectory Simulations</h1>
-        <p className="no-uppercase mx-auto mt-2 max-w-lg text-sm text-zinc-400">
-          Simplified point-mass trajectory modeling for mission planning and illustrative range safety purposes.
-        </p>
-      </div>
+      <h1 className="text-2xl font-bold uppercase tracking-wide">Trajectory Simulations</h1>
       <button onClick={() => setMode("setup")} className="btn-primary">
         Begin New Simulation
       </button>

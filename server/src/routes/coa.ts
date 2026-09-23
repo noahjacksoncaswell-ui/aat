@@ -41,6 +41,10 @@ const coaSchema = z.object({
   dailyWindowClose: z.string().min(1),
   authorizedActivity: z.string().min(1),
   altitudeLimits: z.string().min(1),
+  // v6.1 Item 6 - the structured ceiling value (feet), required going
+  // forward so downstream consumers (the trajectory simulation) never need
+  // to parse the free-text altitudeLimits description.
+  altitudeLimitFt: z.number().nonnegative(),
   conditions: z.string().min(1),
 });
 

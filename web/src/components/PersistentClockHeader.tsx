@@ -129,7 +129,12 @@ export default function PersistentClockHeader({
         <ClockCell
           label="Window Clock"
           sublabel="Launch opportunity window"
-          value={targeted ? windowCountdown!.text : abbreviated ? "PENDING" : "PENDING (NO TLO SEL)"}
+          // v6.1 Item 13 - once the targeted window has opened, the Window
+          // Clock displays OPEN rather than continuing to count up (W+...);
+          // it does not track elapsed time past that point. This is
+          // specific to the Window Clock - the Test and Launch clocks'
+          // own post-target count-up behavior (T+/L+) is untouched.
+          value={targeted ? (windowCountdown!.isPast ? "OPEN" : windowCountdown!.text) : abbreviated ? "PENDING" : "PENDING (NO TLO SEL)"}
           large={large}
         />
         <TargetSubBox value={targeted ? formatTimestamp(targeted.windowOpen, useZulu) : "--"} large={large} />

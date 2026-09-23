@@ -225,6 +225,11 @@ async function main() {
       dailyWindowClose: "18:00",
       authorizedActivity: "Sounding rocket launch operations, unguided, to 30,000 ft AGL",
       altitudeLimits: "Surface to FL300 within a 3nm radius of AAT-LC1",
+      // v6.1 Item 6 - FL300 = 300 x 100 ft = 30,000 ft. Audited/corrected
+      // per the directive's instruction to backfill existing COA records
+      // with the structured numeric value the free text can't reliably
+      // provide by itself.
+      altitudeLimitFt: 30000,
       conditions: "NOTAM required 7 days prior; T-60/T-15/termination calls to ATL ARTCC mandatory.",
     },
   });

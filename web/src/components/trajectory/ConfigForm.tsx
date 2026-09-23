@@ -7,7 +7,6 @@ import {
   DEFAULT_GUIDED_CD,
   DEFAULT_MAIN_CD,
   emptyFormState,
-  parseAltitudeLimitFeet,
   runFullSimulation,
   validateAndBuildConfig,
   type ActiveCoaInfo,
@@ -41,11 +40,20 @@ const DESCENT_OPTIONS: { key: DescentKind; title: string; description: string }[
 const CONFIRMATION_TEXT =
   "I acknowledge that this Trajectory Simulation is a point-mass model. This simulation is provided for mission planning, general range safety, and illustrative purposes only and does not constitute a complete certified flight dynamics analysis or a certified range safety determination. This simulation should be used in conjunction with dynamics analysis and official safety determinations. I have reviewed the input parameters entered above for accuracy and elect to proceed.";
 
+// v6.1 Item 4 - the label is a fixed-min-height flex box with its text
+// bottom-anchored (items-end), so a label that wraps to two lines and one
+// that stays on one line both put their LAST line - and therefore the
+// input directly beneath - at the same y-position. Without this, a grid
+// row mixing short and long labels left each field's input sitting at
+// wherever its own label happened to end, misaligned against its
+// row-mates.
 function Field({ label, unit, children, required }: { label: string; unit?: string; children: React.ReactNode; required?: boolean }) {
   return (
-    <div>
-      <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
-        {label} {unit ? <span className="text-zinc-600">({unit})</span> : null} {required ? <span className="text-aat-nogo">*</span> : null}
+    <div className="flex flex-col">
+      <label className="mb-1 flex min-h-[28px] items-end text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+        <span>
+          {label} {unit ? <span className="text-zinc-600">({unit})</span> : null} {required ? <span className="text-aat-nogo">*</span> : null}
+        </span>
       </label>
       {children}
     </div>
@@ -96,7 +104,7 @@ export default function ConfigForm({ onSubmit, onCancel }: ConfigFormProps) {
       ? {
           authorizedOperationRadiusNm: activeCoa.authorizedOperationRadiusNm,
           altitudeLimits: activeCoa.altitudeLimits,
-          altitudeLimitFeet: parseAltitudeLimitFeet(activeCoa.altitudeLimits),
+          altitudeLimitFt: activeCoa.altitudeLimitFt,
         }
       : null;
 
@@ -319,7 +327,13 @@ export default function ConfigForm({ onSubmit, onCancel }: ConfigFormProps) {
               </div>
               <div>
                 Altitude Limit: <span className="font-mono">{activeCoa.altitudeLimits}</span>
+                {activeCoa.altitudeLimitFt != null && <span className="font-mono"> ({activeCoa.altitudeLimitFt.toLocaleString()} ft ceiling)</span>}
               </div>
+              {activeCoa.altitudeLimitFt == null && (
+                <p className="no-uppercase mt-1 text-aat-caution">
+                  This COA has no structured altitude ceiling on file — the COA altitude overlay will not be displayed in this simulation.
+                </p>
+              )}
             </div>
           ) : (
             <p className="no-uppercase text-xs text-aat-caution">

@@ -126,7 +126,11 @@ export interface SiteOrigin {
 export interface ActiveCoaInfo {
   authorizedOperationRadiusNm: number;
   altitudeLimits: string;
-  altitudeLimitFeet: number | null; // parsed numeric portion, if the free-text field yields one
+  // v6.1 Item 6 - the structured numeric ceiling (feet), read directly from
+  // the COA record. Never derived by parsing altitudeLimits: that free-text
+  // field can contain flight-level notation ("FL300") or other prose that
+  // cannot be reliably converted to a number by pattern-matching.
+  altitudeLimitFt: number | null;
 }
 
 export interface RunMeta {
@@ -149,20 +153,6 @@ export interface BuildConfigResult {
 export interface BuildConfigError {
   ok: false;
   errors: string[];
-}
-
-/**
- * Attempts to parse an FAA COA's free-text Altitude Limit field (Section
- * 2.1 of the v4.0 directive - always a String in this schema) for a leading
- * numeric value in feet, for the 3D COA cylinder's height (Section 6.1).
- * Falls back to null if no plausible numeric prefix is found; the caller
- * omits the cylinder rather than guess at ambiguous text.
- */
-export function parseAltitudeLimitFeet(text: string): number | null {
-  const match = text.match(/[\d,]+(\.\d+)?/);
-  if (!match) return null;
-  const n = Number(match[0].replace(/,/g, ""));
-  return Number.isFinite(n) ? n : null;
 }
 
 export function validateAndBuildConfig(

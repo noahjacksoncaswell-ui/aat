@@ -174,10 +174,44 @@ const Scene3D = forwardRef<Scene3DHandle, Scene3DProps>(function Scene3D({ timeS
     controls.target.set(0, maxAlt * 0.3, 0);
     controls.update();
 
-    // Ground plane
+    // Ground plane.
+    //
+    // v6.1 Item 5 root cause (diagnosed by bisection, not assumed): the
+    // ground plane rendered as a flat, nearly featureless gray regardless
+    // of map type. Isolating the cause step by step -
+    //   1. A solid-color material (no texture map) on this same mesh
+    //      rendered correctly (pure, undiluted color) - ruled out the
+    //      geometry/camera/render-order/compositing pipeline.
+    //   2. Dumping buildGroundTexture()'s raw canvas directly into the DOM
+    //      (bypassing three.js) showed the 2D drawing itself was correct -
+    //      ruled out the texture-generation logic.
+    //   3. Forcing NearestFilter (disabling mipmapping) made faint
+    //      structure appear that was previously invisible, confirming
+    //      texture.repeat scaling with groundSize (see below) was A
+    //      contributing factor, but far too washed-out to be the whole
+    //      story.
+    //   4. Setting texture.colorSpace explicitly resolved it: CanvasTexture
+    //      defaults to THREE.NoColorSpace, but its content is drawn with
+    //      ordinary sRGB-encoded canvas fillStyle colors. With the
+    //      renderer's default outputColorSpace of SRGBColorSpace, an
+    //      untagged (NoColorSpace) texture gets its already-sRGB-encoded
+    //      values treated as linear and then sRGB-encoded a second time on
+    //      output, crushing contrast toward a flat mid-gray. This is the
+    //      actual defect - not a missing/failed texture, a color-space
+    //      mismatch on a texture that WAS loading and applying correctly
+    //      the entire time.
+    //
+    // texture.repeat is also fixed at a constant (rather than the previous
+    // groundSize/100, which scaled with the flight's own extent) since the
+    // camera always frames the ground plane at roughly the same on-screen
+    // footprint regardless of maxRadius - decoupling repeat from
+    // groundSize keeps the pattern's visual frequency resolvable at any
+    // flight scale, independent of the colorSpace fix above.
     const groundSize = maxRadius * 3;
+    const GROUND_TEXTURE_REPEAT = 10;
     const texture = buildGroundTexture(mapType);
-    texture.repeat.set(groundSize / 100, groundSize / 100);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.repeat.set(GROUND_TEXTURE_REPEAT, GROUND_TEXTURE_REPEAT);
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(groundSize, groundSize), new THREE.MeshBasicMaterial({ map: texture }));
     ground.rotation.x = -Math.PI / 2;
     scene.add(ground);

@@ -369,6 +369,9 @@ export interface Coa {
   dailyWindowClose: string;
   authorizedActivity: string;
   altitudeLimits: string;
+  // v6.1 Item 6 - structured ceiling value (feet); required going forward,
+  // nullable in the type only for defensive handling of any legacy record.
+  altitudeLimitFt: number | null;
   conditions: string;
   status: CoaComputedStatus;
   site?: { id: string; name: string; designator: string; lat?: number; lon?: number };

@@ -34,8 +34,44 @@ function findNearestIndexByTime(timeSeries: SimResult["timeSeries"], t: number):
 export default function ResultsView({ config, meta, result, onRestart }: ResultsViewProps) {
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
   const [scrubIndex, setScrubIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
   const sceneRef = useRef<Scene3DHandle>(null);
   const chartRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // v6.1 Item 9.2 - Play/Pause auto-advance. Runs at a constant playback
+  // RATE (sim-seconds per real-second, derived from the flight's own
+  // duration so any flight completes in ~PLAYBACK_TARGET_REAL_SECONDS
+  // regardless of how long it actually took), starting from wherever the
+  // scrub position currently sits - not necessarily t=0 - so Play resumes
+  // forward from a manually-scrubbed position rather than restarting.
+  // scrubIndex is deliberately NOT a dependency: the effect reads it once
+  // at play-start and then drives its own requestAnimationFrame loop,
+  // since re-running this effect on every scrubIndex update (which its own
+  // setScrubIndex calls would trigger) would restart playback every frame.
+  useEffect(() => {
+    if (!isPlaying) return;
+    const PLAYBACK_TARGET_REAL_SECONDS = 20;
+    const finalTimeS = result.timeSeries[result.timeSeries.length - 1].tS;
+    const playbackRate = finalTimeS / PLAYBACK_TARGET_REAL_SECONDS; // sim-seconds per real-second
+    const startSimTimeS = result.timeSeries[scrubIndex].tS;
+    const startRealMs = performance.now();
+    let raf = 0;
+
+    const tick = () => {
+      const elapsedRealS = (performance.now() - startRealMs) / 1000;
+      const targetSimTimeS = startSimTimeS + elapsedRealS * playbackRate;
+      if (targetSimTimeS >= finalTimeS) {
+        setScrubIndex(result.timeSeries.length - 1);
+        setIsPlaying(false);
+        return;
+      }
+      setScrubIndex(findNearestIndexByTime(result.timeSeries, targetSimTimeS));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying]);
 
   useEffect(() => {
     document.documentElement.requestFullscreen?.().catch(() => {});
@@ -52,12 +88,18 @@ export default function ResultsView({ config, meta, result, onRestart }: Results
     }
   }
 
+  // v6.1 Item 2 - a lightweight confirm, consistent with the weight used
+  // elsewhere in the app for non-destructive-but-disruptive actions (e.g.
+  // marking liftoff on the Countdown tab), since this discards the current
+  // run's results and configuration with no way back.
   function handleRestart() {
+    if (!window.confirm("Restart Simulation? This will discard the current results and configuration.")) return;
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     onRestart();
   }
 
   function scrubToTime(t: number) {
+    setIsPlaying(false);
     setScrubIndex(findNearestIndexByTime(result.timeSeries, t));
   }
 
@@ -67,9 +109,28 @@ export default function ResultsView({ config, meta, result, onRestart }: Results
   const flightDurationS = result.timeSeries[result.timeSeries.length - 1]?.tS ?? 0;
   const touchdown = result.timeSeries[result.timeSeries.length - 1];
 
-  const coaAltLimitM = meta.activeCoa?.altitudeLimitFeet != null ? meta.activeCoa.altitudeLimitFeet * 0.3048 : null;
+  const coaAltLimitM = meta.activeCoa?.altitudeLimitFt != null ? meta.activeCoa.altitudeLimitFt * 0.3048 : null;
   const coaRadiusM = meta.activeCoa ? meta.activeCoa.authorizedOperationRadiusNm * 1852 : null;
-  const coaCylinder = coaRadiusM != null && coaAltLimitM != null ? { radiusM: coaRadiusM, heightM: coaAltLimitM } : null;
+  // v6.1 Item 9.1 root cause: this object literal was previously recreated
+  // fresh on every render with no memoization. Scene3D's expensive scene-
+  // construction effect depends on this prop by reference, and every
+  // scrub-slider tick re-renders ResultsView (scrubIndex is state) - so
+  // dragging the slider was tearing down and rebuilding the entire
+  // three.js scene (disposing the WebGLRenderer, creating a new one,
+  // resetting the camera to its default framing) on every single tick.
+  // Rapid renderer creation/disposal during a drag can exhaust the
+  // browser's live WebGL context budget, after which further context
+  // creation silently fails - which is what produced the appearance of
+  // the scrub control "only working" for the earliest part of a drag
+  // before updates stopped landing. Memoizing on the primitive values
+  // means the reference is only ever replaced when the COA data itself
+  // changes, decoupling scene reconstruction from scrubbing entirely (the
+  // marker-position effect, keyed only on scrubIndex, already handles
+  // per-tick updates without touching the scene).
+  const coaCylinder = useMemo(
+    () => (coaRadiusM != null && coaAltLimitM != null ? { radiusM: coaRadiusM, heightM: coaAltLimitM } : null),
+    [coaRadiusM, coaAltLimitM]
+  );
 
   // Section 6.2 - the eleven required 2D graphs.
   const graphs = useMemo(
@@ -105,6 +166,18 @@ export default function ResultsView({ config, meta, result, onRestart }: Results
         yLabel: "Crossrange (m)",
         circleOverlay: coaRadiusM != null ? { radiusM: coaRadiusM } : undefined,
         timeBased: false,
+      },
+      // v6.1 Item 3 - the straight-line (3D) distance from the launch
+      // point, reusing the exact same Math.hypot(xEastM, yNorthM) formula
+      // the Predicted Landing table (PredictedLandingTable.tsx) and PDF
+      // export (pdfExport.ts) already use for the touchdown point, applied
+      // here across the full time series.
+      {
+        title: "12. Distance from Launch Site vs. Time",
+        data: result.timeSeries.map((p) => ({ x: p.tS, y: Math.hypot(p.xEastM, p.yNorthM) })),
+        xLabel: "Time (s)",
+        yLabel: "Distance (m)",
+        timeBased: true,
       },
     ],
     [result, config, coaAltLimitM, coaRadiusM]
@@ -151,14 +224,26 @@ export default function ResultsView({ config, meta, result, onRestart }: Results
                 T+{current.tS.toFixed(2)}s — <span className="text-aat-caution">{PHASE_LABELS[current.phase]}</span>
               </div>
             </div>
-            <input
-              type="range"
-              min={0}
-              max={result.timeSeries.length - 1}
-              value={scrubIndex}
-              onChange={(e) => setScrubIndex(Number(e.target.value))}
-              className="w-full accent-aat-caution"
-            />
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setIsPlaying((p) => !p)}
+                disabled={scrubIndex >= result.timeSeries.length - 1 && !isPlaying}
+                className="btn-secondary shrink-0 px-3 py-1.5 text-xs disabled:opacity-40"
+              >
+                {isPlaying ? "❚❚ Pause" : "▶ Play"}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={result.timeSeries.length - 1}
+                value={scrubIndex}
+                onChange={(e) => {
+                  setIsPlaying(false);
+                  setScrubIndex(Number(e.target.value));
+                }}
+                className="w-full accent-aat-caution"
+              />
+            </div>
           </section>
 
           {/* 3D Visualization - Section 6.1 */}
@@ -257,12 +342,9 @@ export default function ResultsView({ config, meta, result, onRestart }: Results
         </div>
       </div>
 
-      {/* Section 6.7 - persistent scope disclaimer, visible for as long as
-          results are being viewed. */}
-      <div className="shrink-0 border-t border-aat-caution/40 bg-aat-caution/5 px-4 py-2 text-center text-[10px] text-aat-caution">
-        POINT-MASS MODEL — NOT A 6-DOF FLIGHT DYNAMICS SIMULATION. FOR MISSION PLANNING AND ILLUSTRATIVE PURPOSES ONLY. NOT A CERTIFIED RANGE SAFETY
-        DETERMINATION.
-      </div>
+      {/* v6.1 Item 8 - the Section 6.7 persistent banner is removed
+          entirely: redundant with the Section 4.6 checkbox attestation the
+          user already affirmed before running the simulation. */}
       <ClassificationFooter compact />
     </div>
   );

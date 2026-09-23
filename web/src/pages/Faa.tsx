@@ -173,6 +173,7 @@ const EMPTY_COA_FORM = {
   dailyWindowClose: "",
   authorizedActivity: "",
   altitudeLimits: "",
+  altitudeLimitFt: "",
   conditions: "",
 };
 
@@ -243,9 +244,23 @@ function CoaFormFields({ form, setForm, sites }: { form: typeof EMPTY_COA_FORM; 
         rows={2}
       />
       <input
-        placeholder="Altitude / airspace limits *"
+        placeholder="Altitude / airspace limits (description) *"
         value={form.altitudeLimits}
         onChange={(e) => setForm({ ...form, altitudeLimits: e.target.value })}
+        className="input"
+      />
+      {/* v6.1 Item 6 - structured numeric ceiling, required alongside the
+          free-text description above. Anything needing to do math with the
+          COA's vertical limit (the trajectory simulation) reads this field
+          directly rather than parsing the free text, which cannot reliably
+          be converted (e.g. flight-level notation like "FL300"). */}
+      <input
+        type="number"
+        min="0"
+        step="1"
+        placeholder="Altitude limit — ceiling, in feet (e.g. FL300 = 30000) *"
+        value={form.altitudeLimitFt}
+        onChange={(e) => setForm({ ...form, altitudeLimitFt: e.target.value })}
         className="input"
       />
       <textarea
@@ -267,6 +282,7 @@ function NewCoaModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
       createCoa({
         ...form,
         authorizedOperationRadiusNm: Number(form.authorizedOperationRadiusNm),
+        altitudeLimitFt: Number(form.altitudeLimitFt),
         effectiveDate: new Date(form.effectiveDate).toISOString(),
         expirationDate: new Date(form.expirationDate).toISOString(),
       } as any),
@@ -316,6 +332,7 @@ function CoaDetailModal({ coa, onClose, onDone, onDeleted }: { coa: Coa; onClose
     dailyWindowClose: coa.dailyWindowClose,
     authorizedActivity: coa.authorizedActivity,
     altitudeLimits: coa.altitudeLimits,
+    altitudeLimitFt: coa.altitudeLimitFt != null ? String(coa.altitudeLimitFt) : "",
     conditions: coa.conditions,
   });
 
@@ -329,6 +346,7 @@ function CoaDetailModal({ coa, onClose, onDone, onDeleted }: { coa: Coa; onClose
       updateCoa(coa.id, {
         ...form,
         authorizedOperationRadiusNm: Number(form.authorizedOperationRadiusNm),
+        altitudeLimitFt: Number(form.altitudeLimitFt),
         effectiveDate: new Date(form.effectiveDate).toISOString(),
         expirationDate: new Date(form.expirationDate).toISOString(),
       } as any),
@@ -364,6 +382,7 @@ function CoaDetailModal({ coa, onClose, onDone, onDeleted }: { coa: Coa; onClose
               <Field label="Daily operational window" value={`${coa.dailyWindowOpen} – ${coa.dailyWindowClose}`} span2 />
               <Field label="Authorized activity description" value={coa.authorizedActivity} span2 />
               <Field label="Altitude/airspace limits" value={coa.altitudeLimits} span2 />
+              <Field label="Altitude limit (ceiling)" value={coa.altitudeLimitFt != null ? `${coa.altitudeLimitFt.toLocaleString()} ft` : "--"} />
               <Field label="Standard and special provisions" value={coa.conditions} span2 />
             </div>
 
