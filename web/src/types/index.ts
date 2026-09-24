@@ -596,3 +596,43 @@ export const LD_ASSIGNMENT_ATTESTATION_TEXT =
 export function offStationOverrideAttestationText(role: string, assignedName: string, missionDesignator: string): string {
   return `I certify that ${role} — ${assignedName} — is authorized to be off-station for ${missionDesignator} notwithstanding the operational requirement that this role be staffed, and that I possess the requisite authority to make this determination.`;
 }
+
+// ---------------------------------------------------------------------------
+// v7.1 Section 3 - Launch Status Check (role-owned polls). Replaces the flat
+// GoNoGoPoll list on the Polls tab; the underlying GoNoGoPoll type/data and
+// Range Ops Display's summary of it are untouched and out of this scope.
+// ---------------------------------------------------------------------------
+
+export type PollBoxRole = "VSE" | "LWO" | "RC" | "LD";
+
+export interface PollItemState {
+  key: string;
+  box: PollBoxRole;
+  label: string;
+  status: string;
+  isOverridden: boolean;
+  updatedByName: string | null;
+  updatedAt: string | null;
+}
+
+export interface LaunchStatusCheckState {
+  items: PollItemState[];
+  airspaceChecklist: { notamFiled: boolean; t60Complete: boolean; t15Complete: boolean };
+  launchCountTime: {
+    confirmed: boolean;
+    confirmedAt: string | null;
+    confirmedByName: string | null;
+    projectedLiftoff: string | null;
+  };
+  completion: { isGo: boolean; completedAt: string | null };
+}
+
+export interface PollAuditEntry {
+  id: string;
+  itemKey: string;
+  previousValue: string | null;
+  newValue: string;
+  isOverride: boolean;
+  actorName: string;
+  timestamp: string;
+}

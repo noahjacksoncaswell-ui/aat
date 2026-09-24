@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchCountdownState } from "../api/resources";
 import { usePreferences } from "../context/PreferencesContext";
 import { formatTimestamp, formatCountdown } from "../utils/time";
-import { formatMet, formatTMinus, tickTMinusSeconds } from "../utils/countdownMath";
+import { formatMetParts, formatTMinus, tickTMinusSeconds } from "../utils/countdownMath";
 import type { Mission } from "../types";
 
 /**
@@ -114,7 +114,9 @@ export default function PersistentClockHeader({
   if (!state?.lot) {
     launchValue = abbreviated ? "PENDING" : "PENDING (NO LOT SET)";
   } else if (liftoffComplete) {
-    launchValue = "LIFTOFF CONFIRMED";
+    // v7.1 Section 1 - Range Ops Display only, same abbreviated-text
+    // convention as the other abbreviated states below.
+    launchValue = abbreviated ? "LIFTOFF CONF." : "LIFTOFF CONFIRMED";
   } else if (unscheduledHoldActive) {
     launchValue = abbreviated ? "UNSCH. HOLD" : "UNSCHEDULED HOLD";
   } else if (programmedHoldOverage) {
@@ -154,7 +156,21 @@ export default function PersistentClockHeader({
                 ? "PENDING"
                 : "PENDING (NO LOT SET)"
               : state.tCountStatus === "COMPLETE" && state.liftoffActualTime
-                ? formatMet(state.liftoffActualTime, now)
+                ? (() => {
+                    const met = formatMetParts(state.liftoffActualTime, now);
+                    // v7.1 Section 2 - Range Ops Display only: the "MET"
+                    // label renders at roughly half the size of the
+                    // elapsed-time value beside it. Elsewhere (Mission
+                    // Detail), both render at the cell's normal size.
+                    return large ? (
+                      <>
+                        <span className="text-[0.5em] align-middle">{met.prefix} </span>
+                        {met.core}
+                      </>
+                    ) : (
+                      `${met.prefix} ${met.core}`
+                    );
+                  })()
                 : formatTMinus(tMinus)
           }
           accent
@@ -185,7 +201,7 @@ function ClockCell({
 }: {
   label: string;
   sublabel: string;
-  value: string;
+  value: React.ReactNode;
   accent?: boolean;
   holding?: boolean;
   large?: boolean;

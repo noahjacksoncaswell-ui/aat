@@ -97,14 +97,26 @@ export function buildTrajectoryReportPdf(args: {
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 40;
 
+  // v7.1 Section 2A - the fixed platform label and the per-report title
+  // previously shared one baseline (left- and right-justified), which
+  // collided in the middle whenever both were long enough (e.g. a long
+  // populated vehicle name). Stacking the title on its own line below the
+  // label, wrapped to the page width if still too long, means there is no
+  // shared horizontal space left for the two to overlap in, at any length.
   function header(title: string) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
     doc.setTextColor(120, 120, 120);
-    doc.text("AAT LOD PLATFORM — TRAJECTORY SIMULATION REPORT", margin, 24);
-    doc.text(title, pageWidth - margin, 24, { align: "right" });
+    doc.text("AAT LOD PLATFORM — TRAJECTORY SIMULATION REPORT", margin, 14);
+
+    doc.setFontSize(8);
+    doc.setTextColor(90, 90, 90);
+    const titleLines = doc.splitTextToSize(title, pageWidth - margin * 2);
+    doc.text(titleLines, pageWidth - margin, 25, { align: "right" });
+
+    const ruleY = 25 + (titleLines.length - 1) * 9 + 5;
     doc.setDrawColor(60, 60, 60);
-    doc.line(margin, 30, pageWidth - margin, 30);
+    doc.line(margin, ruleY, pageWidth - margin, ruleY);
   }
 
   // --- Title page ---

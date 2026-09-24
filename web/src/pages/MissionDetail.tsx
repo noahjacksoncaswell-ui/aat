@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -6,11 +6,16 @@ import {
   addLaunchPeriodEntry,
   addLogEntry,
   cancelMission,
+  clearPollItemOverride,
+  confirmLaunchCountTime,
   fetchLaunchDayNotifications,
+  fetchLaunchStatusCheck,
   fetchLotCertification,
+  fetchLwccState,
   fetchMission,
   fetchMissionPersonnel,
   fetchNotamStatus,
+  fetchPollHistory,
   fetchSiteWeather,
   fileNotam,
   logDisposition,
@@ -18,8 +23,8 @@ import {
   removeLaunchPeriodEntry,
   removeMission,
   scrubMission,
+  setPollItem,
   targetLaunchOpportunity,
-  updateGoNoGo,
   updateLaunchDayNotification,
   updateSiteFacilityContacts,
   uploadDocument,
@@ -29,10 +34,11 @@ import { usePreferences } from "../context/PreferencesContext";
 import { formatTimestamp } from "../utils/time";
 import { StatusPill, missionStatusTone, goNoGoTone } from "../components/StatusPill";
 import { useMissionSocket } from "../hooks/useSocket";
+import { useFullscreenChrome } from "../components/Layout";
 import PersistentClockHeader from "../components/PersistentClockHeader";
 import CountdownTab from "../components/CountdownTab";
 import LwccTab from "../components/LwccTab";
-import type { NotificationType, Site } from "../types";
+import type { LaunchStatusCheckState, NotificationType, PollBoxRole, Site } from "../types";
 import { DISPOSITION_OUTCOMES } from "../types";
 
 const TABS = ["Overview", "Countdown", "Polls", "FAA & NOTAM", "Log", "History", "LWCC"] as const;
@@ -59,6 +65,18 @@ export default function MissionDetail() {
     qc.invalidateQueries({ queryKey: ["notifications", missionId] });
   });
 
+  // v7.1 Section 4 - on-demand fullscreen: opt-in every visit, never
+  // automatic. Reset on unmount so navigating away (a link, the back
+  // button, anything other than the Exit button) always restores chrome
+  // for whatever page comes next, rather than leaving it stuck hidden.
+  // Called unconditionally, before the loading-state early return below,
+  // so this component's hook count never varies between renders.
+  const { hideChrome, setHideChrome } = useFullscreenChrome();
+  useEffect(() => {
+    return () => setHideChrome(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (isLoading || !mission) return <div className="p-8 text-slate-400">Loading mission...</div>;
 
   const targeted = mission.launchPeriodEntries.find((e) => e.isTargeted);
@@ -78,7 +96,19 @@ export default function MissionDetail() {
             {mission.designator} · {mission.vehicle.name} · {mission.site.name}
           </div>
         </div>
-        <StatusPill tone={missionStatusTone(mission.status)}>{mission.status.replace("_", " ")}</StatusPill>
+        <div className="flex items-center gap-3">
+          {!hideChrome && (
+            <button onClick={() => setHideChrome(true)} className="btn-secondary text-xs">
+              Full Screen
+            </button>
+          )}
+          {hideChrome && (
+            <button onClick={() => setHideChrome(false)} className="btn-secondary text-xs">
+              Exit Full Screen
+            </button>
+          )}
+          <StatusPill tone={missionStatusTone(mission.status)}>{mission.status.replace("_", " ")}</StatusPill>
+        </div>
       </header>
 
       <PersistentClockHeader mission={mission} />
@@ -847,56 +877,459 @@ function WeatherSummary({ siteId, vehicle }: { siteId: string; vehicle: any }) {
   );
 }
 
+// v7.1 Section 3 - Launch Status Check, a full rebuild of the Polls tab
+// owned by the four required mission roles (v7.0's LD/RC/LWO/VSE
+// assignment data). Order top to bottom: VSE, LWO, RC, LD - the higher-
+// volume technical checklists first, ending with the LD's final synthesis.
+const POLL_BOX_LABELS: Record<PollBoxRole, string> = {
+  VSE: "VEHICLE SYSTEMS ENGINEER (VSE)",
+  LWO: "LAUNCH WEATHER OFFICER (LWO)",
+  RC: "RANGE COORDINATOR (RC)",
+  LD: "LAUNCH DIRECTOR (LD)",
+};
+const STANDARD_OPTIONS = ["UNPOLLED", "GO", "NO_GO", "HOLD"];
+const WEATHER_OPTIONS = ["UNPOLLED", "CLEAR", "NOT_CLEAR", "HOLD"];
+const RANGE_STATUS_OPTIONS = ["UNPOLLED", "CLEAR_TO_PROCEED", "NOT_CLEAR_TO_PROCEED", "HOLD"];
+const FINAL_STATUS_OPTIONS = ["UNPOLLED", "GO_FOR_LAUNCH", "NO_GO", "HOLD"];
+
+function pollColor(status: string) {
+  if (["GO", "CLEAR", "CLEAR_TO_PROCEED", "GO_FOR_LAUNCH"].includes(status)) return "border-aat-go text-aat-go";
+  if (["NO_GO", "NOT_CLEAR", "NOT_CLEAR_TO_PROCEED"].includes(status)) return "border-aat-nogo text-aat-nogo";
+  if (status === "HOLD") return "border-aat-caution text-aat-caution";
+  return "border-zinc-700 text-zinc-500";
+}
+
 function PollsTab({ mission, missionId }: any) {
+  const { user, isAdmin } = useAuth();
+  const { useZulu } = usePreferences();
   const qc = useQueryClient();
-  const updatePoll = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) => updateGoNoGo(missionId, id, { status }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["mission", missionId] }),
-    onError: (err: any) => alert(err?.response?.data?.error ?? "Failed to update poll"),
+
+  const { data: personnelState } = useQuery({ queryKey: ["mission-personnel", missionId], queryFn: () => fetchMissionPersonnel(missionId) });
+  const { data: check } = useQuery({
+    queryKey: ["launch-status-check", missionId],
+    queryFn: () => fetchLaunchStatusCheck(missionId),
+    refetchInterval: 15_000,
+  });
+  const { data: lwcc } = useQuery({ queryKey: ["lwcc", missionId], queryFn: () => fetchLwccState(missionId), refetchInterval: 30_000 });
+  const { data: history } = useQuery({ queryKey: ["poll-history", missionId], queryFn: () => fetchPollHistory(missionId) });
+
+  function invalidate() {
+    qc.invalidateQueries({ queryKey: ["launch-status-check", missionId] });
+    qc.invalidateQueries({ queryKey: ["poll-history", missionId] });
+  }
+  useMissionSocket(missionId, invalidate);
+
+  const setItemMutation = useMutation({
+    mutationFn: ({ key, status }: { key: string; status: string }) => setPollItem(missionId, key, status),
+    onSuccess: invalidate,
+    onError: (err: any) => alert(err?.response?.data?.error ?? "Failed to update"),
   });
 
+  if (!check || !personnelState) return <div className="p-6 text-slate-400">Loading Launch Status Check...</div>;
+
+  const assignmentFor = (role: PollBoxRole) => personnelState.assignments.find((a: any) => a.role === role) ?? null;
+  const itemFor = (key: string) => check.items.find((i) => i.key === key)!;
+
+  const targeted = mission.launchPeriodEntries?.find((e: any) => e.isTargeted);
+  const now = Date.now();
+  const within24h = targeted
+    ? (() => {
+        const open = new Date(targeted.windowOpen).getTime();
+        const close = new Date(targeted.windowClose).getTime();
+        return (open <= now + 24 * 3600 * 1000 && open >= now) || (open <= now && close >= now);
+      })()
+    : false;
+
+  function boxProps(role: PollBoxRole) {
+    const assignment = assignmentFor(role);
+    const isOwn = !!user && assignment?.userId === user.id;
+    return { assignment, isOwn, canEdit: isOwn };
+  }
+  const vse = boxProps("VSE");
+  const lwo = boxProps("LWO");
+  const rc = boxProps("RC");
+  const ld = boxProps("LD");
+
+  function row(key: string, box: { canEdit: boolean }, options: string[], affirmativeValue: string) {
+    const item = itemFor(key);
+    return (
+      <PollDropdownRow
+        key={key}
+        label={item.label}
+        status={item.status}
+        options={options}
+        canEdit={box.canEdit}
+        isAdmin={isAdmin}
+        affirmativeValue={affirmativeValue}
+        onSet={(status) => setItemMutation.mutate({ key, status })}
+        updatedByName={item.updatedByName}
+        updatedAt={item.updatedAt}
+        useZulu={useZulu}
+      />
+    );
+  }
+
   return (
-    <div className="mx-auto max-w-2xl">
-      <section className="card p-5">
-        <div className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Launch Status Check</div>
-        <p className="mb-3 text-[11px] text-slate-400">
-          Each discipline station reports independently, rolling up to a single Launch Director final call. FAA/Airspace remains gated by
-          the launch-day notification checklist (FAA & NOTAM tab).
-        </p>
-        <div className="space-y-2">
-          {mission.goNoGoPolls?.map((poll: any) => (
-            <div key={poll.id} className="flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
-              <span>{poll.stationName}</span>
-              <select
-                value={poll.status}
-                onChange={(e) => updatePoll.mutate({ id: poll.id, status: e.target.value })}
-                className={`rounded-md border px-2 py-1 text-xs font-semibold ${pollColor(poll.status)}`}
-              >
-                {["UNPOLLED", "GO", "NO_GO", "HOLD"].map((s) => (
-                  <option key={s} value={s}>
-                    {s.replace("_", " ")}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ))}
-        </div>
-      </section>
+    <div className="mx-auto max-w-4xl space-y-4">
+      <CompletionBanner check={check} useZulu={useZulu} />
+
+      <RoleBoxShell
+        boxLabel={POLL_BOX_LABELS.VSE}
+        assignmentName={vse.assignment?.userName ?? "UNASSIGNED"}
+        isOwn={vse.isOwn}
+        indicator={<OnStationIndicator assignment={vse.assignment} within24h={within24h} />}
+      >
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Vehicle Systems</div>
+        {["VSE_PROPULSION", "VSE_AVIONICS", "VSE_TELEMETRY", "VSE_STAGING", "VSE_RECOVERY"].map((key) => row(key, vse, STANDARD_OPTIONS, "GO"))}
+        <div className="mb-1 mt-3 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Ground Systems</div>
+        {["VSE_PAD", "VSE_LCS", "VSE_LOIS"].map((key) => row(key, vse, STANDARD_OPTIONS, "GO"))}
+      </RoleBoxShell>
+
+      <RoleBoxShell
+        boxLabel={POLL_BOX_LABELS.LWO}
+        assignmentName={lwo.assignment?.userName ?? "UNASSIGNED"}
+        isOwn={lwo.isOwn}
+        indicator={<OnStationIndicator assignment={lwo.assignment} within24h={within24h} />}
+      >
+        <LwccReadoutRow lwcc={lwcc} />
+        {row("LWO_WEATHER", lwo, WEATHER_OPTIONS, "CLEAR")}
+      </RoleBoxShell>
+
+      <RoleBoxShell
+        boxLabel={POLL_BOX_LABELS.RC}
+        assignmentName={rc.assignment?.userName ?? "UNASSIGNED"}
+        isOwn={rc.isOwn}
+        indicator={<OnStationIndicator assignment={rc.assignment} within24h={within24h} />}
+      >
+        {row("RC_COMMUNICATIONS", rc, STANDARD_OPTIONS, "GO")}
+        {row("RC_OPS_SUPPORT", rc, STANDARD_OPTIONS, "GO")}
+        <AirspaceRow item={itemFor("RC_AIRSPACE")} checklist={check.airspaceChecklist} isAdmin={isAdmin} missionId={missionId} onChanged={invalidate} />
+        {row("RC_RANGE_STATUS", rc, RANGE_STATUS_OPTIONS, "CLEAR_TO_PROCEED")}
+      </RoleBoxShell>
+
+      <RoleBoxShell
+        boxLabel={POLL_BOX_LABELS.LD}
+        assignmentName={ld.assignment?.userName ?? "UNASSIGNED"}
+        isOwn={ld.isOwn}
+        indicator={<OnStationIndicator assignment={ld.assignment} within24h={within24h} />}
+      >
+        {row("LD_FINAL_LAUNCH_STATUS", ld, FINAL_STATUS_OPTIONS, "GO_FOR_LAUNCH")}
+        <LaunchCountTimeBlock missionId={missionId} check={check} canEdit={ld.canEdit} isAdmin={isAdmin} useZulu={useZulu} onChanged={invalidate} />
+      </RoleBoxShell>
+
+      <PollHistoryPanel history={history} useZulu={useZulu} />
     </div>
   );
 }
 
-function pollColor(status: string) {
-  switch (status) {
-    case "GO":
-      return "border-aat-go text-aat-go";
-    case "NO_GO":
-      return "border-aat-nogo text-aat-nogo";
-    case "HOLD":
-      return "border-aat-caution text-aat-caution";
-    default:
-      return "border-slate-300 dark:border-slate-700";
+// Section 3.2 - on-station status indicator: green (on station, regardless
+// of window proximity), blinking orange (not on station, within 24h of the
+// Targeted Launch Opportunity), or grayed "NOT ON STATION" (not on
+// station, more than 24h out or no TLO confirmed).
+function OnStationIndicator({ assignment, within24h }: { assignment: any; within24h: boolean }) {
+  const [blinkOn, setBlinkOn] = useState(true);
+  const onStation = !!assignment?.onStationAt;
+  const shouldBlink = !onStation && within24h;
+
+  useEffect(() => {
+    if (!shouldBlink) return;
+    const t = setInterval(() => setBlinkOn((b) => !b), 800);
+    return () => clearInterval(t);
+  }, [shouldBlink]);
+
+  if (onStation) return <span className="status-pill status-go">ON STATION</span>;
+  if (shouldBlink) return <span className={`status-pill ${blinkOn ? "status-caution" : "status-neutral"}`}>NOT ON STATION</span>;
+  return <span className="status-pill status-neutral">NOT ON STATION</span>;
+}
+
+// Section 3.7 - the box is outlined in the accent color when the viewer is
+// its assigned holder; individual controls inside are gated separately
+// (grayed/disabled for everyone else, per PollDropdownRow below).
+function RoleBoxShell({
+  boxLabel,
+  assignmentName,
+  isOwn,
+  indicator,
+  children,
+}: {
+  boxLabel: string;
+  assignmentName: string;
+  isOwn: boolean;
+  indicator: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={`card p-5 ${isOwn ? "border-2 border-aat-accent" : ""}`}>
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <div className="text-sm font-bold uppercase tracking-wide">{boxLabel}</div>
+          <div className={`text-xs ${assignmentName === "UNASSIGNED" ? "text-aat-nogo" : "text-zinc-500"}`}>{assignmentName}</div>
+        </div>
+        {indicator}
+      </div>
+      <div className="space-y-2">{children}</div>
+    </section>
+  );
+}
+
+// A normal 4(or fewer)-state dropdown, usable only by the box's assigned
+// holder; Admin gets a separate one-click "Override" control beside it
+// (Section 3.7) that forces the item to its GO/proceed/clear equivalent,
+// bypassing the assigned-person-only restriction - logged server-side as
+// an override whenever the actor isn't the assigned holder.
+function PollDropdownRow({
+  label,
+  status,
+  options,
+  canEdit,
+  isAdmin,
+  affirmativeValue,
+  onSet,
+  updatedByName,
+  updatedAt,
+  useZulu,
+}: {
+  label: string;
+  status: string;
+  options: string[];
+  canEdit: boolean;
+  isAdmin: boolean;
+  affirmativeValue: string;
+  onSet: (status: string) => void;
+  updatedByName: string | null;
+  updatedAt: string | null;
+  useZulu: boolean;
+}) {
+  return (
+    <div className="border border-zinc-800 px-3 py-2 text-sm">
+      <div className="flex items-center justify-between">
+        <span>{label}</span>
+        <div className="flex items-center gap-2">
+          <select
+            value={status}
+            disabled={!canEdit}
+            onChange={(e) => onSet(e.target.value)}
+            className={`input w-auto py-1 text-xs disabled:opacity-40 ${pollColor(status)}`}
+          >
+            {options.map((o) => (
+              <option key={o} value={o}>
+                {o.replace(/_/g, " ")}
+              </option>
+            ))}
+          </select>
+          {isAdmin && (
+            <button onClick={() => onSet(affirmativeValue)} className="text-[10px] font-semibold text-aat-caution hover:underline" title="Admin override">
+              Override
+            </button>
+          )}
+        </div>
+      </div>
+      {updatedByName && (
+        <div className="mt-0.5 text-[10px] text-zinc-600">
+          Last set by {updatedByName}
+          {updatedAt ? `, ${formatTimestamp(updatedAt, useZulu)}` : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Section 3.4 - a live, read-only readout of the LWCC banner (Section
+// 7.1/v3.0, as corrected by later revisions) - never a separately-set
+// manual value, and matches that banner's own NO VIOLATION/VIOLATION
+// format and violation enumeration exactly.
+function LwccReadoutRow({ lwcc }: { lwcc: any }) {
+  if (!lwcc) return <div className="border border-zinc-800 px-3 py-2 text-sm text-zinc-500">Loading LWCC status...</div>;
+  return (
+    <div className="border border-zinc-800 px-3 py-2 text-sm">
+      <div className="flex items-center justify-between">
+        <span>LWCC</span>
+        <span className={`status-pill ${lwcc.bannerStatus === "VIOLATION" ? "status-nogo" : "status-go"}`}>{lwcc.bannerStatus.replace("_", " ")}</span>
+      </div>
+      {lwcc.bannerStatus === "VIOLATION" && (
+        <ul className="mt-1 space-y-0.5 text-[11px] text-zinc-400">
+          {lwcc.violatingRows.map((r: any) => (
+            <li key={r.no} className="font-mono">
+              — LWCCR {r.no} ({r.description}){r.currentValue != null ? ` — CURRENT: ${r.currentValue.toFixed(1)}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-0.5 text-[10px] text-zinc-600">Live readout from the LWCC tab — not independently editable here.</div>
+    </div>
+  );
+}
+
+// Section 3.5 - Airspace is computed (UNPOLLED more than 24h out; GO once
+// the NOTAM/T-60/T-15 checklist is complete within 24h, NO-GO otherwise -
+// Termination is deliberately excluded). No one "sets" it normally; an
+// Admin override is the only way to force a value, and it persists until
+// cleared (reverting to the live-computed value).
+function AirspaceRow({
+  item,
+  checklist,
+  isAdmin,
+  missionId,
+  onChanged,
+}: {
+  item: { status: string; isOverridden: boolean };
+  checklist: { notamFiled: boolean; t60Complete: boolean; t15Complete: boolean };
+  isAdmin: boolean;
+  missionId: string;
+  onChanged: () => void;
+}) {
+  const setMutation = useMutation({ mutationFn: (status: string) => setPollItem(missionId, "RC_AIRSPACE", status), onSuccess: onChanged });
+  const clearMutation = useMutation({ mutationFn: () => clearPollItemOverride(missionId, "RC_AIRSPACE"), onSuccess: onChanged });
+
+  return (
+    <div className="border border-zinc-800 px-3 py-2 text-sm">
+      <div className="flex items-center justify-between">
+        <span>Airspace</span>
+        <div className="flex items-center gap-2">
+          <span className={`border px-2 py-0.5 text-xs font-semibold ${pollColor(item.status)}`}>{item.status.replace(/_/g, " ")}</span>
+          {item.isOverridden && <span className="text-[10px] text-aat-caution">(OVERRIDDEN)</span>}
+          {isAdmin && !item.isOverridden && (
+            <button onClick={() => setMutation.mutate("GO")} className="text-[10px] font-semibold text-aat-caution hover:underline">
+              Override → GO
+            </button>
+          )}
+          {isAdmin && item.isOverridden && (
+            <button onClick={() => clearMutation.mutate()} className="text-[10px] text-zinc-400 hover:underline">
+              Clear Override
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="mt-1 text-[10px] text-zinc-600">
+        Computed: NOTAM {checklist.notamFiled ? "FILED" : "NOT FILED"} · T-60 {checklist.t60Complete ? "COMPLETE" : "PENDING"} · T-15{" "}
+        {checklist.t15Complete ? "COMPLETE" : "PENDING"}
+      </div>
+    </div>
+  );
+}
+
+// Section 3.6 - the LD's callout-and-readback confirmation of the Launch
+// Clock's current projected liftoff time. A mismatch is rejected outright
+// and blocks completion; a match, combined with Final Launch Status
+// reading GO FOR LAUNCH, is what completes the check (Section 3.8).
+function LaunchCountTimeBlock({
+  missionId,
+  check,
+  canEdit,
+  isAdmin,
+  useZulu,
+  onChanged,
+}: {
+  missionId: string;
+  check: LaunchStatusCheckState;
+  canEdit: boolean;
+  isAdmin: boolean;
+  useZulu: boolean;
+  onChanged: () => void;
+}) {
+  const [entered, setEntered] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const mutation = useMutation({
+    mutationFn: () => confirmLaunchCountTime(missionId, entered),
+    onSuccess: () => {
+      setError(null);
+      setEntered("");
+      onChanged();
+    },
+    onError: (err: any) => setError(err?.response?.data?.error ?? "Confirmation failed"),
+  });
+  const disabled = !canEdit && !isAdmin;
+
+  return (
+    <div className="border border-zinc-800 p-3">
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Launch Count Time Confirmation</div>
+      <div className="mb-2 text-xs text-zinc-400">
+        Launch Clock projected liftoff:{" "}
+        <span className="font-mono text-zinc-200">
+          {check.launchCountTime.projectedLiftoff ? formatTimestamp(check.launchCountTime.projectedLiftoff, true) : "--"}
+        </span>
+      </div>
+      {check.launchCountTime.confirmed ? (
+        <div className="text-xs font-semibold text-aat-go">
+          CONFIRMED by {check.launchCountTime.confirmedByName}
+          {check.launchCountTime.confirmedAt ? `, ${formatTimestamp(check.launchCountTime.confirmedAt, useZulu)}` : ""}
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <input
+            value={entered}
+            onChange={(e) => setEntered(e.target.value)}
+            placeholder="HHMM Zulu"
+            disabled={disabled}
+            className="input w-32 py-1 text-xs disabled:opacity-40"
+          />
+          <button
+            onClick={() => mutation.mutate()}
+            disabled={disabled || !entered.trim() || mutation.isPending}
+            className="btn-secondary px-2 py-1 text-xs disabled:opacity-40"
+          >
+            {mutation.isPending ? "Confirming..." : "Confirm"}
+          </button>
+        </div>
+      )}
+      {error && <p className="mt-1 text-[11px] text-aat-nogo">{error}</p>}
+    </div>
+  );
+}
+
+// Section 3.8 - the single completion banner above the four role boxes.
+function CompletionBanner({ check, useZulu }: { check: LaunchStatusCheckState; useZulu: boolean }) {
+  if (check.completion.isGo && check.completion.completedAt) {
+    return (
+      <div className="card border-2 border-aat-go bg-aat-go/10 p-4 text-center text-sm font-bold uppercase tracking-wide text-aat-go">
+        LAUNCH STATUS CHECK: GO — LSC COMPLETED AT {formatTimestamp(check.completion.completedAt, useZulu)} — PROCEEDING WITH TERMINAL COUNT UPON
+        PROGRAMMED LSC HOLD RELEASE
+      </div>
+    );
   }
+  return (
+    <div className="card border border-zinc-700 p-4 text-center text-sm font-bold uppercase tracking-wide text-zinc-400">
+      LAUNCH STATUS CHECK: IN PROGRESS — NOT YET COMPLETE
+    </div>
+  );
+}
+
+function PollHistoryPanel({ history, useZulu }: { history: any; useZulu: boolean }) {
+  return (
+    <section className="card p-5">
+      <div className="mb-3 text-sm font-bold uppercase tracking-wide text-zinc-300">Launch Status Check Activity Log</div>
+      {!history?.length ? (
+        <p className="text-sm text-zinc-500">No poll activity on file for this mission.</p>
+      ) : (
+        <div className="max-h-72 overflow-y-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-zinc-800 text-zinc-500">
+                <th className="py-1.5 pr-4">When</th>
+                <th className="py-1.5 pr-4">Item</th>
+                <th className="py-1.5 pr-4">Previous</th>
+                <th className="py-1.5 pr-4">New</th>
+                <th className="py-1.5 pr-4">By</th>
+                <th className="py-1.5 pr-4">Override?</th>
+              </tr>
+            </thead>
+            <tbody className="font-mono">
+              {history.map((h: any) => (
+                <tr key={h.id} className="border-b border-zinc-900">
+                  <td className="py-1.5 pr-4">{formatTimestamp(h.timestamp, useZulu)}</td>
+                  <td className="py-1.5 pr-4 font-sans uppercase">{h.itemKey.replace(/_/g, " ")}</td>
+                  <td className="py-1.5 pr-4">{h.previousValue ?? "--"}</td>
+                  <td className="py-1.5 pr-4">{h.newValue}</td>
+                  <td className="py-1.5 pr-4">{h.actorName}</td>
+                  <td className="py-1.5 pr-4 font-sans">{h.isOverride ? <span className="text-aat-caution">YES</span> : "No"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
 }
 
 const NOTIFICATION_LABELS: Record<NotificationType, string> = {

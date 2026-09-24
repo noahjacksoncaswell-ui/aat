@@ -198,6 +198,11 @@ model User {
   qualifications               PersonnelQualification[]        @relation("QualificationHolder")
   qualificationsGranted        PersonnelQualification[]        @relation("QualificationGrantedBy")
 
+  // v7.1 - Launch Status Check poll items
+  pollItemsUpdated          PollItem[]
+  pollAuditEntriesActed     PollAuditEntry[]
+  launchCountTimeConfirmed  Mission[]        @relation("LaunchCountTimeConfirmedBy")
+
   @@index([role])
 }
 
@@ -444,6 +449,18 @@ model Mission {
 
   lwccLogClearedAt DateTime? // Section 7.5 - display-only clear; rows are never deleted
 
+  // v7.1 Section 3.6 - the LD's Launch Count Time callout-and-readback
+  // confirmation. Stores a SNAPSHOT of what the Launch Clock's projected
+  // liftoff time was at the moment of confirmation, rather than a plain
+  // boolean: if the projected liftoff later changes (e.g. a new hold),
+  // the confirmation is automatically stale (this value no longer matches
+  // the live-computed projected liftoff) without needing a separate
+  // invalidation step, and the LD must re-confirm.
+  launchCountTimeConfirmedValue  DateTime?
+  launchCountTimeConfirmedAt     DateTime?
+  launchCountTimeConfirmedById   String?
+  launchCountTimeConfirmedBy     User?     @relation("LaunchCountTimeConfirmedBy", fields: [launchCountTimeConfirmedById], references: [id])
+
   launchPeriodEntries    LaunchPeriodEntry[]
   historyEvents          MissionHistoryEvent[]
   disposition            MissionDisposition?
@@ -465,6 +482,12 @@ model Mission {
   // roster above (Section 2/10 of the v7.0 directive).
   personnelAssignments  MissionPersonnelAssignment[]
   personnelAuditEntries MissionPersonnelAuditEntry[]
+  // v7.1 Section 3 - the role-owned Launch Status Check poll items and
+  // their audit log, a full rebuild of the flat GoNoGoPoll list above (that
+  // model and Range Ops Display's existing summary of it are left
+  // untouched - out of this directive's scope, which is the Polls tab only).
+  pollItems       PollItem[]
+  pollAuditEntries PollAuditEntry[]
 
   @@index([status])
   @@index([siteId])
@@ -607,6 +630,53 @@ model GoNoGoPoll {
   createdAt   DateTime     @default(now())
 
   @@unique([missionId, stationName])
+}
+
+// v7.1 Section 3 - the role-owned Launch Status Check (VSE/LWO/RC/LD boxes).
+// itemKey is a fixed string identifying which poll item this is (e.g.
+// "VSE_PROPULSION", "RC_AIRSPACE", "LD_FINAL_LAUNCH_STATUS" - see
+// POLL_ITEM_CATALOG in services/pollItems.ts for the full set and each
+// item's allowed status values). status is plain text rather than an enum
+// because different items have different value sets (standard GO/NO-GO/
+// UNPOLLED/HOLD vs. weather's CLEAR/NOT CLEAR vs. the LD's GO FOR LAUNCH/
+// NO-GO, etc.) - validated server-side per item, not at the DB level.
+// RC_AIRSPACE is the one item with no normal "assigned person sets it"
+// path at all (Section 3.5: it is computed from the NOTAM/T-60/T-15
+// checklist) - a row only ever exists for it as the result of an Admin
+// override, and its absence means "use the live-computed value."
+model PollItem {
+  id          String   @id @default(uuid())
+  missionId   String
+  mission     Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  itemKey     String
+  status      String
+  updatedById String?
+  updatedBy   User?    @relation(fields: [updatedById], references: [id])
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@unique([missionId, itemKey])
+  @@index([missionId])
+}
+
+// Append-only, mirroring MissionPersonnelAuditEntry's pattern (a distinct
+// log, not a repurposing of MissionHistoryEvent). isOverride is true when
+// the actor was an Admin acting outside their own assigned role for that
+// item (Section 3.7) - the required "who, which item, when, prior value"
+// record for every override.
+model PollAuditEntry {
+  id            String   @id @default(uuid())
+  missionId     String
+  mission       Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  itemKey       String
+  previousValue String?
+  newValue      String
+  isOverride    Boolean  @default(false)
+  actorId       String
+  actor         User     @relation(fields: [actorId], references: [id])
+  timestamp     DateTime @default(now())
+
+  @@index([missionId])
 }
 
 model MissionLogEntry {

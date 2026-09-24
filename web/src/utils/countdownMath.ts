@@ -29,6 +29,14 @@ export function formatTMinus(seconds: number | null): string {
 }
 
 export function formatMet(liftoffActualTime: string, now: Date): string {
+  const { core } = formatMetParts(liftoffActualTime, now);
+  return `MET ${core}`;
+}
+
+// v7.1 Section 2 - split out so the "MET" label and the "+HH:MM:SS" value
+// can be rendered at different font sizes (Range Ops Display only); the
+// underlying elapsed-time computation is unchanged from formatMet above.
+export function formatMetParts(liftoffActualTime: string, now: Date): { prefix: string; core: string } {
   const seconds = Math.max(0, (now.getTime() - new Date(liftoffActualTime).getTime()) / 1000);
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
@@ -36,5 +44,5 @@ export function formatMet(liftoffActualTime: string, now: Date): string {
   const secs = Math.floor(seconds % 60);
   const pad = (n: number) => String(n).padStart(2, "0");
   const core = days > 0 ? `${days}d ${pad(hours)}:${pad(minutes)}:${pad(secs)}` : `${pad(hours)}:${pad(minutes)}:${pad(secs)}`;
-  return `MET +${core}`;
+  return { prefix: "MET", core: `+${core}` };
 }

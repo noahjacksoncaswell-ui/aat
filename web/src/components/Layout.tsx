@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext";
@@ -93,10 +93,27 @@ const navItems = [
   { to: "/personnel", label: "Personnel & Stations" },
 ];
 
+// v7.1 Section 4 - lets a page nested under this Layout (currently only
+// Mission Detail) collapse the sidebar/top chrome on demand, the same
+// layout mechanism Range Ops Display uses by being routed outside Layout
+// entirely (Section 3 of the v5.1 directive) - Range Ops can't express
+// this as a toggle since it's never rendered inside Layout to begin with,
+// but a page that normally lives here needs a variant, not a separate
+// route. hideChrome always starts false and only a page's own effect
+// turns it on, so fullscreen is opt-in per visit, never automatic.
+const FullscreenChromeContext = createContext<{ hideChrome: boolean; setHideChrome: (v: boolean) => void }>({
+  hideChrome: false,
+  setHideChrome: () => {},
+});
+export function useFullscreenChrome() {
+  return useContext(FullscreenChromeContext);
+}
+
 export default function Layout() {
   const { user, logout, isAdmin } = useAuth();
   const { useZulu, toggleZulu } = usePreferences();
   const navigate = useNavigate();
+  const [hideChrome, setHideChrome] = useState(false);
 
   // v5.3 Item 2 - live UTC/Local clocks above the sitewide toggle.
   // Milliseconds are a sidebar-only display option (nowhere else uses them).
@@ -104,8 +121,10 @@ export default function Layout() {
   const { utcTime, localTime } = useLiveClock({ showMs });
 
   return (
+    <FullscreenChromeContext.Provider value={{ hideChrome, setHideChrome }}>
     <div className="flex h-screen w-full flex-col overflow-hidden bg-black text-zinc-100">
       <div className="flex flex-1 overflow-hidden">
+        {!hideChrome && (
         <aside className="flex w-64 shrink-0 flex-col border-r border-zinc-800 bg-aat-navy">
           {/* v5.2 Section 1 - the logo replaces the former square "A" mark +
               AAT/Launch Ops Division text entirely; it is bounded to this
@@ -187,11 +206,13 @@ export default function Layout() {
             <StationCheckInButton />
           </div>
         </aside>
+        )}
         <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>
       </div>
       <ClassificationFooter />
     </div>
+    </FullscreenChromeContext.Provider>
   );
 }

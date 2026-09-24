@@ -4,6 +4,7 @@ import type {
   CountdownState,
   DocumentRecord,
   DocumentStatus,
+  LaunchStatusCheckState,
   LwccState,
   Mission,
   MilestoneTemplate,
@@ -14,6 +15,7 @@ import type {
   MissionRole,
   MyStationState,
   PersonnelListEntry,
+  PollAuditEntry,
   QualificationRole,
   Site,
   UserRecord,
@@ -212,3 +214,15 @@ export const setOffStationOverride = (missionId: string, assignmentId: string, r
   api.post<MissionPersonnelAssignmentRecord>(`/missions/${missionId}/personnel/${assignmentId}/override`, { reason }).then((r) => r.data);
 export const clearOffStationOverride = (missionId: string, assignmentId: string) =>
   api.delete(`/missions/${missionId}/personnel/${assignmentId}/override`);
+
+// Launch Status Check (v7.1)
+export const fetchLaunchStatusCheck = (missionId: string) =>
+  api.get<LaunchStatusCheckState>(`/missions/${missionId}/polls`).then((r) => r.data);
+export const fetchPollHistory = (missionId: string) =>
+  api.get<PollAuditEntry[]>(`/missions/${missionId}/polls/history`).then((r) => r.data);
+export const setPollItem = (missionId: string, itemKey: string, status: string) =>
+  api.post(`/missions/${missionId}/polls/${itemKey}`, { status }).then((r) => r.data);
+export const clearPollItemOverride = (missionId: string, itemKey: string) =>
+  api.delete(`/missions/${missionId}/polls/${itemKey}`);
+export const confirmLaunchCountTime = (missionId: string, enteredTimeZulu: string) =>
+  api.post(`/missions/${missionId}/polls/launch-count-time`, { enteredTimeZulu }).then((r) => r.data);
