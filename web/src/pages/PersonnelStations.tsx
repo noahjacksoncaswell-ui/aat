@@ -18,7 +18,7 @@ import { useAuth } from "../context/AuthContext";
 import { formatTimestamp } from "../utils/time";
 import { usePreferences } from "../context/PreferencesContext";
 import { useMissionSocket } from "../hooks/useSocket";
-import { LD_ASSIGNMENT_ATTESTATION_TEXT, offStationOverrideAttestationText } from "../types";
+import { LD_ASSIGNMENT_ATTESTATION_TEXT, offStationOverrideAttestationText, websiteRoleLabel } from "../types";
 import type {
   Mission,
   MissionPersonnelAssignmentRecord,
@@ -242,7 +242,7 @@ function PersonnelListSection({ personnelList, canManage }: { personnelList?: Pe
           {personnelList?.map((p) => (
             <tr key={p.id} className="border-b border-zinc-900">
               <td className="py-2 pr-4">{p.name}</td>
-              <td className="py-2 pr-4 text-xs text-zinc-400">{p.websiteRole.replace("_", " ")}</td>
+              <td className="py-2 pr-4 text-xs text-zinc-400">{websiteRoleLabel(p.websiteRole)}</td>
               <td className="py-2 pr-4">
                 <span className={`status-pill ${p.isOnline ? "status-go" : "status-neutral"}`}>{p.isOnline ? "ONLINE" : "OFFLINE"}</span>
               </td>
@@ -372,8 +372,12 @@ function AssignmentSection({
   const [operatorRole, setOperatorRole] = useState<MissionRole>("RC");
   const [operatorUserId, setOperatorUserId] = useState("");
 
-  const operators = personnelList.filter((p) => p.websiteRole === "OPERATOR");
-  const launchDirectors = personnelList.filter((p) => p.websiteRole === "LAUNCH_DIRECTOR");
+  // v7.0.2 Section 1.2 - Admin-website-role users are now eligible for any
+  // mission role, identical in eligibility to Launch Director (for LD) and
+  // Operator (for RC/LWO/VSE/Ops Support); this supersedes v7.0 Section
+  // 4.2's original exclusion of Admin from the LD dropdown.
+  const operators = personnelList.filter((p) => p.websiteRole === "OPERATOR" || p.websiteRole === "ADMIN");
+  const launchDirectors = personnelList.filter((p) => p.websiteRole === "LAUNCH_DIRECTOR" || p.websiteRole === "ADMIN");
 
   const assignOperatorMutation = useMutation({
     mutationFn: () => assignOperator(mission.id, { userId: operatorUserId, role: operatorRole }),

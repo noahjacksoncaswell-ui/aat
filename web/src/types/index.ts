@@ -1,6 +1,22 @@
 export type Role = "ADMIN" | "LAUNCH_DIRECTOR" | "OPERATOR" | "VIEWER";
 export type UserStatus = "ACTIVE" | "INACTIVE";
 
+// v7.0.2 Section 2 - display-only rename of the Admin website role to
+// "LOIS Admin." A label change only: the underlying Role enum value stays
+// "ADMIN" everywhere (RBAC checks, API payloads, the DB) - this affects
+// only what's rendered to the user. Every place that renders a website
+// role as text should go through this helper rather than the raw enum
+// value, so the rename applies consistently sitewide.
+const WEBSITE_ROLE_LABELS: Record<string, string> = {
+  ADMIN: "LOIS ADMIN",
+  LAUNCH_DIRECTOR: "LAUNCH DIRECTOR",
+  OPERATOR: "OPERATOR",
+  VIEWER: "VIEWER",
+};
+export function websiteRoleLabel(role: string): string {
+  return WEBSITE_ROLE_LABELS[role] ?? role.replace(/_/g, " ");
+}
+
 export interface AuthUser {
   id: string;
   name: string;

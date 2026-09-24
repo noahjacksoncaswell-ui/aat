@@ -4,6 +4,7 @@ import { createUser, deactivateUser, fetchActivityLog, fetchSites, fetchUsers, u
 import { usePreferences } from "../context/PreferencesContext";
 import { formatTimestamp } from "../utils/time";
 import { StatusPill } from "../components/StatusPill";
+import { websiteRoleLabel } from "../types";
 
 // Vehicle and VLCP Milestone Template management live entirely under the
 // Vehicles tab (v3.1 Item 6) - Admin is reserved for administrative
@@ -97,7 +98,7 @@ function UsersTab() {
                   >
                     {["ADMIN", "LAUNCH_DIRECTOR", "OPERATOR", "VIEWER"].map((r) => (
                       <option key={r} value={r}>
-                        {r.replace("_", " ")}
+                        {websiteRoleLabel(r)}
                       </option>
                     ))}
                   </select>
@@ -145,7 +146,7 @@ function UsersTab() {
               <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="input">
                 {["ADMIN", "LAUNCH_DIRECTOR", "OPERATOR", "VIEWER"].map((r) => (
                   <option key={r} value={r}>
-                    {r.replace("_", " ")}
+                    {websiteRoleLabel(r)}
                   </option>
                 ))}
               </select>

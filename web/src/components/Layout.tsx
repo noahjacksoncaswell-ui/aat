@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { usePreferences } from "../context/PreferencesContext";
 import { useLiveClock } from "../hooks/useLiveClock";
 import { fetchMyStation, toggleOnStation } from "../api/resources";
+import { websiteRoleLabel } from "../types";
 import ClassificationFooter from "./ClassificationFooter";
 
 const MISSION_ROLE_LABELS: Record<string, string> = { LD: "LD", RC: "RC", LWO: "LWO", VSE: "VSE", OPS_SUPPORT: "OPS SUPPORT" };
@@ -172,7 +173,7 @@ export default function Layout() {
           <div className="flex items-stretch gap-2 border-t border-zinc-800 px-4 py-4">
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium normal-case">{user?.name}</div>
-              <div className="text-[11px] text-zinc-400">{user?.role.replace("_", " ")}</div>
+              <div className="text-[11px] text-zinc-400">{user ? websiteRoleLabel(user.role) : ""}</div>
               <button
                 onClick={async () => {
                   await logout();

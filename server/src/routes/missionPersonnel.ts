@@ -179,9 +179,12 @@ router.post("/ld", requireLaunchDirector, async (req, res) => {
   const parsed = ldSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
+  // v7.0.2 Section 1.2 - Admin-website-role users are now eligible for LD
+  // assignment too, identical in eligibility to Launch Director; this
+  // supersedes v7.0's original exclusion of Admin from this dropdown.
   const candidate = await prisma.user.findUnique({ where: { id: parsed.data.userId } });
-  if (!candidate || candidate.role !== Role.LAUNCH_DIRECTOR || candidate.status !== UserStatus.ACTIVE) {
-    return res.status(400).json({ error: "Selected user is not an active Launch Director." });
+  if (!candidate || (candidate.role !== Role.LAUNCH_DIRECTOR && candidate.role !== Role.ADMIN) || candidate.status !== UserStatus.ACTIVE) {
+    return res.status(400).json({ error: "Selected user is not an active Launch Director or Admin." });
   }
 
   const assignment = await assignRole({
@@ -208,9 +211,11 @@ router.post("/operators", requireLaunchDirector, async (req, res) => {
   const parsed = operatorSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
+  // v7.0.2 Section 1.2 - Admin-website-role users are now eligible for
+  // RC/LWO/VSE/Ops Support too, identical in eligibility to Operator.
   const candidate = await prisma.user.findUnique({ where: { id: parsed.data.userId } });
-  if (!candidate || candidate.role !== Role.OPERATOR || candidate.status !== UserStatus.ACTIVE) {
-    return res.status(400).json({ error: "Selected user is not an active Operator." });
+  if (!candidate || (candidate.role !== Role.OPERATOR && candidate.role !== Role.ADMIN) || candidate.status !== UserStatus.ACTIVE) {
+    return res.status(400).json({ error: "Selected user is not an active Operator or Admin." });
   }
 
   const assignment = await assignRole({

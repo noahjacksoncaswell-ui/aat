@@ -6,6 +6,7 @@ import { usePreferences } from "../context/PreferencesContext";
 import { formatCountdown, formatTimestamp } from "../utils/time";
 import { StatusPill, weatherStatusTone, coaStatusTone, missionStatusTone } from "../components/StatusPill";
 import { useDashboardSocket } from "../hooks/useSocket";
+import { websiteRoleLabel } from "../types";
 
 export default function Dashboard() {
   const { useZulu } = usePreferences();
@@ -71,7 +72,7 @@ export default function Dashboard() {
                   <div className="mt-1 flex flex-wrap gap-2 text-xs">
                     {next.personnelOnConsole.map((p: any) => (
                       <span key={p.id} className="rounded-full bg-slate-100 px-2.5 py-1 dark:bg-slate-800">
-                        {p.name} · {p.role}
+                        {p.name} · {websiteRoleLabel(p.role)}
                       </span>
                     ))}
                   </div>

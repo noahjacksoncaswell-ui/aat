@@ -9,12 +9,13 @@ import { isUserOnline } from "../websocket";
 // tags, and the sidebar's 24-hour "my station" lookup (Section 9).
 const router = Router();
 
-// Section 3 - active Launch Director or Operator website-role users only;
-// Admin/Viewer explicitly excluded (they can never hold a mission
-// personnel role per Sections 3-4).
+// Section 3, as revised by v7.0.2 Section 1.1 - active Launch Director,
+// Operator, or Admin website-role users; Viewer remains excluded (Admin is
+// now eligible for mission-role assignment per v7.0.2 Section 1.2, which
+// reverses v7.0's original Admin exclusion).
 router.get("/", async (_req, res) => {
   const users = await prisma.user.findMany({
-    where: { status: UserStatus.ACTIVE, role: { in: [Role.LAUNCH_DIRECTOR, Role.OPERATOR] } },
+    where: { status: UserStatus.ACTIVE, role: { in: [Role.LAUNCH_DIRECTOR, Role.OPERATOR, Role.ADMIN] } },
     orderBy: { name: "asc" },
     include: { qualifications: true },
   });
@@ -45,8 +46,8 @@ router.post("/:userId/qualifications", requireLaunchDirector, async (req, res) =
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   const target = await prisma.user.findUnique({ where: { id: req.params.userId } });
-  if (!target || (target.role !== Role.LAUNCH_DIRECTOR && target.role !== Role.OPERATOR)) {
-    return res.status(400).json({ error: "Qualification tags apply only to Launch Director or Operator users." });
+  if (!target || (target.role !== Role.LAUNCH_DIRECTOR && target.role !== Role.OPERATOR && target.role !== Role.ADMIN)) {
+    return res.status(400).json({ error: "Qualification tags apply only to Launch Director, Operator, or Admin users." });
   }
 
   const qualification = await prisma.personnelQualification.upsert({
