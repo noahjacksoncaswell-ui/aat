@@ -1,9 +1,80 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext";
 import { usePreferences } from "../context/PreferencesContext";
 import { useLiveClock } from "../hooks/useLiveClock";
+import { fetchMyStation, toggleOnStation } from "../api/resources";
 import ClassificationFooter from "./ClassificationFooter";
+
+const MISSION_ROLE_LABELS: Record<string, string> = { LD: "LD", RC: "RC", LWO: "LWO", VSE: "VSE", OPS_SUPPORT: "OPS SUPPORT" };
+
+// v7.0 Section 9 - sidebar ON STATION check-in control, 4 states. Polls
+// /personnel/my-station (the same near-term-assignment resolution the
+// mission-scoped ON STATION table's data ultimately derives from) so this
+// reflects real assignment/check-in state, not a local-only toggle.
+function StationCheckInButton() {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+  const { data: myStation } = useQuery({ queryKey: ["my-station"], queryFn: fetchMyStation, refetchInterval: 30_000 });
+  const [blinkOn, setBlinkOn] = useState(true);
+
+  useEffect(() => {
+    if (myStation?.state !== "REPORT_TO_STATION") return;
+    const t = setInterval(() => setBlinkOn((b) => !b), 800);
+    return () => clearInterval(t);
+  }, [myStation?.state]);
+
+  const toggleMutation = useMutation({
+    mutationFn: (onStation: boolean) => {
+      if (!myStation?.missionId || !myStation?.assignmentId) return Promise.reject(new Error("No qualifying assignment"));
+      return toggleOnStation(myStation.missionId, myStation.assignmentId, onStation);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["my-station"] }),
+  });
+
+  const baseClasses = "flex flex-1 flex-col items-center justify-center gap-0.5 border px-1.5 text-center leading-tight";
+
+  // State 1 - no qualifying assignment: grayed out, not clickable.
+  if (!myStation || myStation.state === "NO_ASSIGNMENT") {
+    return (
+      <div className={`${baseClasses} cursor-default border-zinc-800 bg-zinc-950 text-[8px] font-semibold uppercase text-zinc-600`}>
+        No Assignment W/I 24Hrs
+      </div>
+    );
+  }
+
+  // State 2 - assigned, not yet checked in: blinks gray/yellow, clickable.
+  if (myStation.state === "REPORT_TO_STATION") {
+    return (
+      <button
+        onClick={() => toggleMutation.mutate(true)}
+        className={`${baseClasses} text-[8px] font-bold uppercase transition-colors ${
+          blinkOn ? "border-aat-caution bg-aat-caution text-black" : "border-zinc-700 bg-zinc-900 text-zinc-400"
+        }`}
+      >
+        <span>Report to Station</span>
+        <span>{myStation.missionDesignator}</span>
+      </button>
+    );
+  }
+
+  // State 3 - on-station: solid green, double-click reverts to State 2.
+  return (
+    <button
+      onDoubleClick={() => toggleMutation.mutate(false)}
+      className={`${baseClasses} border-aat-go bg-aat-go text-black`}
+      title="Double-click to check off station"
+    >
+      <span className="text-[8px] font-bold uppercase">
+        {MISSION_ROLE_LABELS[myStation.missionRole ?? ""] ?? myStation.missionRole} — {user?.name}
+      </span>
+      <span className="text-[9px] font-extrabold uppercase">ON STATION</span>
+      <span className="text-[8px] font-bold uppercase">{myStation.missionDesignator}</span>
+      <span className="text-[7px] normal-case text-black/70">double-click to check off station</span>
+    </button>
+  );
+}
 
 const navItems = [
   { to: "/", label: "Dashboard", end: true },
@@ -17,6 +88,8 @@ const navItems = [
   // v5.1 Section 2 - available to every role (a display surface, not a
   // control surface), positioned second-to-last, immediately before Admin.
   { to: "/range-ops", label: "Range Ops Display" },
+  // v7.0 Section 1 - positioned immediately above Admin.
+  { to: "/personnel", label: "Personnel & Stations" },
 ];
 
 export default function Layout() {
@@ -93,18 +166,24 @@ export default function Layout() {
               Toggle Sitewide
             </button>
           </div>
-          <div className="border-t border-zinc-800 px-4 py-4">
-            <div className="text-sm font-medium normal-case">{user?.name}</div>
-            <div className="text-[11px] text-zinc-400">{user?.role.replace("_", " ")}</div>
-            <button
-              onClick={async () => {
-                await logout();
-                navigate("/login");
-              }}
-              className="mt-2 text-xs font-medium text-aat-accent hover:underline"
-            >
-              Sign Out
-            </button>
+          {/* v7.0 Section 9 - the ON STATION check-in control sits to the
+              right of the existing name/role/sign-out block, sized to the
+              same vertical height (items-stretch) via a shared flex row. */}
+          <div className="flex items-stretch gap-2 border-t border-zinc-800 px-4 py-4">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium normal-case">{user?.name}</div>
+              <div className="text-[11px] text-zinc-400">{user?.role.replace("_", " ")}</div>
+              <button
+                onClick={async () => {
+                  await logout();
+                  navigate("/login");
+                }}
+                className="mt-2 text-xs font-medium text-aat-accent hover:underline"
+              >
+                Sign Out
+              </button>
+            </div>
+            <StationCheckInButton />
           </div>
         </aside>
         <main className="flex-1 overflow-y-auto">

@@ -5,6 +5,20 @@ import { env } from "../config/env";
 
 let io: SocketIOServer | null = null;
 
+// v7.0 Section 8 - "Online Status" for the ON STATION table needs some
+// notion of "currently authenticated and active in an application
+// session." This app has no session table (JWT access/refresh only), so
+// presence is tracked via live socket connections instead: a per-user
+// open-connection count (a user can have more than one tab/socket open),
+// incremented on connect and decremented on disconnect. A lightweight,
+// in-memory mechanism, consistent with this codebase's existing pattern
+// for the v4.1 live hold-trigger scheduler.
+const onlineConnectionCounts = new Map<string, number>();
+
+export function isUserOnline(userId: string): boolean {
+  return (onlineConnectionCounts.get(userId) ?? 0) > 0;
+}
+
 export function initWebsocket(httpServer: HttpServer) {
   io = new SocketIOServer(httpServer, {
     cors: { origin: env.corsOrigin },
@@ -14,7 +28,8 @@ export function initWebsocket(httpServer: HttpServer) {
     const token = socket.handshake.auth?.token as string | undefined;
     if (!token) return next(new Error("Missing auth token"));
     try {
-      verifyAccessToken(token);
+      const payload = verifyAccessToken(token);
+      (socket.data as { userId?: string }).userId = payload.sub;
       next();
     } catch {
       next(new Error("Invalid auth token"));
@@ -22,6 +37,11 @@ export function initWebsocket(httpServer: HttpServer) {
   });
 
   io.on("connection", (socket) => {
+    const userId = (socket.data as { userId?: string }).userId;
+    if (userId) {
+      onlineConnectionCounts.set(userId, (onlineConnectionCounts.get(userId) ?? 0) + 1);
+    }
+
     socket.on("subscribe:mission", (missionId: string) => {
       socket.join(`mission:${missionId}`);
     });
@@ -29,6 +49,13 @@ export function initWebsocket(httpServer: HttpServer) {
       socket.leave(`mission:${missionId}`);
     });
     socket.join("dashboard");
+
+    socket.on("disconnect", () => {
+      if (!userId) return;
+      const next = (onlineConnectionCounts.get(userId) ?? 1) - 1;
+      if (next <= 0) onlineConnectionCounts.delete(userId);
+      else onlineConnectionCounts.set(userId, next);
+    });
   });
 
   return io;

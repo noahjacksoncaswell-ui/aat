@@ -9,6 +9,7 @@ import {
   fetchLaunchDayNotifications,
   fetchLotCertification,
   fetchMission,
+  fetchMissionPersonnel,
   fetchNotamStatus,
   fetchSiteWeather,
   fileNotam,
@@ -645,6 +646,12 @@ function OverviewTab({ mission, missionId, useZulu, onRequestScrub }: any) {
   const [newEntry, setNewEntry] = useState({ date: "", windowOpen: "", windowClose: "" });
   const [addendumText, setAddendumText] = useState("");
 
+  // v7.0 Section 7 - the Assigned Personnel box now reflects the
+  // Personnel & Stations page's assignments (LD/RC/LWO/VSE), not the
+  // pre-existing free-text UserMissionAssignment roster this box used to
+  // render statically.
+  const { data: personnelState } = useQuery({ queryKey: ["mission-personnel", missionId], queryFn: () => fetchMissionPersonnel(missionId) });
+
   const addEntry = useMutation({
     mutationFn: () =>
       addLaunchPeriodEntry(missionId, {
@@ -787,17 +794,16 @@ function OverviewTab({ mission, missionId, useZulu, onRequestScrub }: any) {
         </section>
         <section className="card p-5">
           <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Assigned Personnel</div>
-          <div className="space-y-1 text-sm">
-            {mission.assignedUsers?.length ? (
-              mission.assignedUsers.map((a: any) => (
-                <div key={a.user.id} className="flex justify-between">
-                  <span>{a.user.name}</span>
-                  <span className="text-xs text-slate-500 dark:text-slate-400">{a.role || a.user.role}</span>
+          <div className="space-y-1 font-mono text-sm">
+            {(["LD", "RC", "LWO", "VSE"] as const).map((role) => {
+              const assignment = personnelState?.assignments.find((a: any) => a.role === role);
+              return (
+                <div key={role} className="flex justify-between">
+                  <span>{role}:</span>
+                  <span className={assignment ? "" : "text-aat-nogo"}>{assignment ? assignment.userName : "UNASSIGNED"}</span>
                 </div>
-              ))
-            ) : (
-              <span className="text-slate-400">No personnel assigned.</span>
-            )}
+              );
+            })}
           </div>
         </section>
         <section className="card p-5">

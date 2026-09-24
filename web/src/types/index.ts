@@ -506,3 +506,77 @@ export const DOCUMENT_CATEGORIES = [
   TRAJECTORY_SIMULATION_REPORT_CATEGORY,
   "Other",
 ];
+
+// ---------------------------------------------------------------------------
+// v7.0 - Personnel & Stations. "Mission role" (this section) is genuinely
+// separate from the website Role type at the top of this file - see
+// Section 2/10 of the v7.0 directive and the MissionPersonnelAssignment
+// schema comment for the full rationale. Never conflate the two.
+// ---------------------------------------------------------------------------
+
+export type MissionRole = "LD" | "RC" | "LWO" | "VSE" | "OPS_SUPPORT";
+export type QualificationRole = "RC" | "LWO" | "VSE";
+
+export interface PersonnelListEntry {
+  id: string;
+  name: string;
+  websiteRole: Role;
+  isOnline: boolean;
+  qualifications: { role: QualificationRole; expiresAt: string | null; active: boolean }[];
+}
+
+export interface MissionPersonnelAssignmentRecord {
+  id: string;
+  missionId: string;
+  role: MissionRole;
+  userId: string;
+  userName: string;
+  assignedAt: string;
+  assignedById: string;
+  assignedByName: string;
+  attestationSignatureName: string | null;
+  attestationSignatureRole: string | null;
+  attestationSignedAt: string | null;
+  onStationAt: string | null;
+  offStationOverride: boolean;
+  offStationOverrideReason: string | null;
+  offStationOverrideById: string | null;
+  offStationOverrideByName: string | null;
+  offStationOverrideAt: string | null;
+}
+
+export interface MissionPersonnelState {
+  assignments: MissionPersonnelAssignmentRecord[];
+  missingRoles: MissionRole[];
+}
+
+export interface MissionPersonnelAuditEntry {
+  id: string;
+  role: MissionRole;
+  action: string;
+  previousUserName: string | null;
+  newUserName: string | null;
+  notes: string | null;
+  actorName: string;
+  timestamp: string;
+}
+
+export interface MyStationState {
+  state: "NO_ASSIGNMENT" | "REPORT_TO_STATION" | "ON_STATION";
+  assignmentId?: string;
+  missionId?: string;
+  missionDesignator?: string;
+  missionRole?: MissionRole;
+  onStationAt?: string | null;
+}
+
+// Section 4.2 - verbatim confirmation/attestation text for LD assignment.
+// Kept as an exported constant so the exact wording lives in exactly one
+// place, matching the v5.0 LOT_CERTIFICATION_TEXTS convention.
+export const LD_ASSIGNMENT_ATTESTATION_TEXT =
+  "I certify that I possess the requisite authority under the American Aerospace Technologies Corp Launch Operations Division organizational structure to make this assignment, and that this assignment is accurate to the best of my knowledge. This assignment shall remain in effect until modified or superseded through this same process.";
+
+// Section 8.1 - verbatim off-station override attestation text template.
+export function offStationOverrideAttestationText(role: string, assignedName: string, missionDesignator: string): string {
+  return `I certify that ${role} — ${assignedName} — is authorized to be off-station for ${missionDesignator} notwithstanding the operational requirement that this role be staffed, and that I possess the requisite authority to make this determination.`;
+}

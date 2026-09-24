@@ -8,6 +8,13 @@ import type {
   Mission,
   MilestoneTemplate,
   MilestoneTemplateOptions,
+  MissionPersonnelAssignmentRecord,
+  MissionPersonnelAuditEntry,
+  MissionPersonnelState,
+  MissionRole,
+  MyStationState,
+  PersonnelListEntry,
+  QualificationRole,
   Site,
   UserRecord,
   Vehicle,
@@ -180,3 +187,28 @@ export const updateUser = (id: string, data: Record<string, unknown>) => api.pat
 export const deactivateUser = (id: string) => api.delete(`/users/${id}`);
 export const fetchActivityLog = (params: Record<string, string | number | undefined> = {}) =>
   api.get("/admin/activity-log", { params }).then((r) => r.data);
+
+// Personnel & Stations (v7.0)
+export const fetchPersonnelList = () => api.get<PersonnelListEntry[]>("/personnel").then((r) => r.data);
+export const setQualification = (userId: string, role: QualificationRole, expiresAt: string | null) =>
+  api.post(`/personnel/${userId}/qualifications`, { role, expiresAt }).then((r) => r.data);
+export const removeQualification = (userId: string, role: QualificationRole) =>
+  api.delete(`/personnel/${userId}/qualifications/${role}`);
+export const fetchMyStation = () => api.get<MyStationState>("/personnel/my-station").then((r) => r.data);
+
+export const fetchMissionPersonnel = (missionId: string) =>
+  api.get<MissionPersonnelState>(`/missions/${missionId}/personnel`).then((r) => r.data);
+export const fetchMissionPersonnelHistory = (missionId: string) =>
+  api.get<MissionPersonnelAuditEntry[]>(`/missions/${missionId}/personnel/history`).then((r) => r.data);
+export const assignLd = (missionId: string, data: { userId: string; signatureName: string; signatureRole: string }) =>
+  api.post<MissionPersonnelAssignmentRecord>(`/missions/${missionId}/personnel/ld`, data).then((r) => r.data);
+export const assignOperator = (missionId: string, data: { userId: string; role: MissionRole }) =>
+  api.post<MissionPersonnelAssignmentRecord>(`/missions/${missionId}/personnel/operators`, data).then((r) => r.data);
+export const removePersonnelAssignment = (missionId: string, assignmentId: string) =>
+  api.delete(`/missions/${missionId}/personnel/${assignmentId}`);
+export const toggleOnStation = (missionId: string, assignmentId: string, onStation: boolean) =>
+  api.post<MissionPersonnelAssignmentRecord>(`/missions/${missionId}/personnel/${assignmentId}/station`, { onStation }).then((r) => r.data);
+export const setOffStationOverride = (missionId: string, assignmentId: string, reason: string) =>
+  api.post<MissionPersonnelAssignmentRecord>(`/missions/${missionId}/personnel/${assignmentId}/override`, { reason }).then((r) => r.data);
+export const clearOffStationOverride = (missionId: string, assignmentId: string) =>
+  api.delete(`/missions/${missionId}/personnel/${assignmentId}/override`);

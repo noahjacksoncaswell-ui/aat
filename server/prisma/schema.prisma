@@ -188,6 +188,16 @@ model User {
   lotCertificationsSigned   LotCertification[] @relation("LotCertificationSignedBy")
   lotCertificationsResolved LotCertification[] @relation("LotCertificationCofrGateResolvedBy")
 
+  // v7.0 - mission personnel
+  personnelAssignments        MissionPersonnelAssignment[]    @relation("PersonnelAssignmentHolder")
+  personnelAssignmentsMade    MissionPersonnelAssignment[]    @relation("PersonnelAssignmentAssignedBy")
+  personnelOverridesMade      MissionPersonnelAssignment[]    @relation("PersonnelAssignmentOverrideBy")
+  personnelAuditEntriesActed  MissionPersonnelAuditEntry[]    @relation("PersonnelAuditActor")
+  personnelAuditEntriesAsPrev MissionPersonnelAuditEntry[]    @relation("PersonnelAuditPreviousUser")
+  personnelAuditEntriesAsNew  MissionPersonnelAuditEntry[]    @relation("PersonnelAuditNewUser")
+  qualifications               PersonnelQualification[]        @relation("QualificationHolder")
+  qualificationsGranted        PersonnelQualification[]        @relation("QualificationGrantedBy")
+
   @@index([role])
 }
 
@@ -450,6 +460,11 @@ model Mission {
   lwccOverrides          LwccOverride[]
   lwccLogEntries         LwccLogEntry[]
   lotCertifications      LotCertification[]
+  // v7.0 - mission personnel (LD/RC/LWO/VSE/Ops Support), genuinely separate
+  // data from the pre-existing free-text UserMissionAssignment console
+  // roster above (Section 2/10 of the v7.0 directive).
+  personnelAssignments  MissionPersonnelAssignment[]
+  personnelAuditEntries MissionPersonnelAuditEntry[]
 
   @@index([status])
   @@index([siteId])
@@ -648,6 +663,113 @@ model LotCertification {
 
   @@index([missionId])
   @@index([comrDocumentId])
+}
+
+// ---------------------------------------------------------------------------
+// Revision Directive v7.0 - Personnel & Stations
+//
+// Section 2/10: "mission role" (LD/RC/LWO/VSE/Ops Support, assigned per
+// mission) is modeled as genuinely separate data from the pre-existing
+// website RBAC "role" field on User - never overloaded or repurposed.
+// MissionPersonnelAssignment is CURRENT STATE (one row per current holder);
+// MissionPersonnelAuditEntry is the separate append-only history (Section 5).
+//
+// Singular-slot enforcement for LD/RC/LWO/VSE (exactly one holder per
+// mission) is application-level (see routes/personnel.ts), matching this
+// schema's existing convention of app-level business-rule enforcement
+// (e.g. COA/mission site-deletion checks) rather than exotic partial unique
+// indexes. @@unique([missionId, userId]) below is the one DB-level
+// invariant that holds regardless of role: "an Operator may hold only one
+// mission role per mission at a time" (Section 4.3) applies uniformly to
+// LD/RC/LWO/VSE/OPS_SUPPORT alike.
+// ---------------------------------------------------------------------------
+
+enum MissionRole {
+  LD
+  RC
+  LWO
+  VSE
+  OPS_SUPPORT
+}
+
+// Section 3.1 - RC/LWO/VSE only; LD eligibility is gated by website role
+// (Section 4.2), not a taggable qualification.
+enum QualificationRole {
+  RC
+  LWO
+  VSE
+}
+
+model MissionPersonnelAssignment {
+  id        String      @id @default(uuid())
+  missionId String
+  mission   Mission     @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User        @relation("PersonnelAssignmentHolder", fields: [userId], references: [id])
+  role      MissionRole
+
+  assignedAt   DateTime @default(now())
+  assignedById String
+  assignedBy   User     @relation("PersonnelAssignmentAssignedBy", fields: [assignedById], references: [id])
+
+  // Section 4.2 - LD assignment attestation. Populated only when role = LD;
+  // the assigning user (assignedBy) and the attesting/signing user are the
+  // same person, per the directive, so no separate signedBy relation is
+  // needed beyond assignedBy. Convention matches LotCertification above.
+  attestationSignatureName String?
+  attestationSignatureRole String?
+  attestationSignedAt      DateTime?
+
+  // Section 9 - self-check-in.
+  onStationAt DateTime?
+
+  // Section 8.1 - off-station override, Admin/LD-gated, required reason.
+  offStationOverride         Boolean   @default(false)
+  offStationOverrideReason   String?
+  offStationOverrideById     String?
+  offStationOverrideBy       User?     @relation("PersonnelAssignmentOverrideBy", fields: [offStationOverrideById], references: [id])
+  offStationOverrideAt       DateTime?
+
+  @@unique([missionId, userId])
+  @@index([missionId])
+  @@index([userId])
+}
+
+model MissionPersonnelAuditEntry {
+  id        String      @id @default(uuid())
+  missionId String
+  mission   Mission     @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  role      MissionRole
+  // ASSIGNED / REASSIGNED / REMOVED / ON_STATION / OFF_STATION / OFF_STATION_OVERRIDE
+  action    String
+
+  previousUserId String?
+  previousUser   User?   @relation("PersonnelAuditPreviousUser", fields: [previousUserId], references: [id])
+  newUserId      String?
+  newUser        User?   @relation("PersonnelAuditNewUser", fields: [newUserId], references: [id])
+
+  notes     String?
+  actorId   String
+  actor     User     @relation("PersonnelAuditActor", fields: [actorId], references: [id])
+  timestamp DateTime @default(now())
+
+  @@index([missionId])
+}
+
+// Section 3.1 - person-level qualification tags (RC/LWO/VSE), applicable
+// across every mission the person might work - not a per-mission setting.
+model PersonnelQualification {
+  id          String            @id @default(uuid())
+  userId      String
+  user        User              @relation("QualificationHolder", fields: [userId], references: [id], onDelete: Cascade)
+  role        QualificationRole
+  expiresAt   DateTime?
+  createdAt   DateTime          @default(now())
+  createdById String
+  createdBy   User              @relation("QualificationGrantedBy", fields: [createdById], references: [id])
+
+  @@unique([userId, role])
+  @@index([userId])
 }
 
 // ---------------------------------------------------------------------------
