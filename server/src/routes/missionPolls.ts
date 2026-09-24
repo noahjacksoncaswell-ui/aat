@@ -4,7 +4,7 @@ import { MissionRole, Role } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { broadcastMissionUpdate } from "../websocket";
 import { computeProjectedLiftoff } from "../services/countdown";
-import { POLL_ITEM_CATALOG, getPollItemDef } from "../services/pollItems";
+import { POLL_ITEM_CATALOG, computeUnsatisfiedItems, getPollItemDef } from "../services/pollItems";
 
 // v7.1 Section 3 - Launch Status Check (role-owned polls). Replaces the
 // flat GoNoGoPoll list's role on the Polls tab; that model, its routes,
@@ -76,11 +76,12 @@ function parseZuluTimeToMinutes(input: string): number | null {
   return hours * 60 + minutes;
 }
 
-router.get("/", async (req, res) => {
-  const mission = await loadMissionForPolls(missionId(req));
-  if (!mission) return res.status(404).json({ error: "Mission not found" });
-  const now = new Date();
-
+// v7.1.1 - the single source of truth for Launch Status Check state,
+// shared by every route below (GET /, the item-set/override routes' lock
+// check, and the launch-count-time route's readiness gate) so the
+// sequential-gating and post-completion-lock rules can never drift
+// between the read path and the write paths that must enforce them.
+async function computeLscState(mission: MissionForPolls, now: Date = new Date()) {
   const storedItems = await prisma.pollItem.findMany({
     where: { missionId: mission.id },
     include: { updatedBy: { select: { id: true, name: true } } },
@@ -100,21 +101,29 @@ router.get("/", async (req, res) => {
     };
   });
 
+  // Section 1, step 1 - every item, LWCC excluded (it isn't in the
+  // catalog at all - it's a pure live readout, never a stored PollItem).
+  const notGoItems = computeUnsatisfiedItems(items);
+  const readiness = { allGo: notGoItems.length === 0, notGoItems };
+
   const projectedLiftoff = computeProjectedLiftoff(mission, mission.holds, now);
   const timeConfirmed =
     !!mission.launchCountTimeConfirmedValue && !!projectedLiftoff && sameMinuteUtc(mission.launchCountTimeConfirmedValue, projectedLiftoff);
 
+  // Section 1, step 3 - the time confirmation is the actual completion
+  // trigger, not Final Launch Status alone; readiness.allGo (which
+  // already includes LD_FINAL_LAUNCH_STATUS) is a prerequisite for it.
+  const isGo = readiness.allGo && timeConfirmed;
   const ldItem = items.find((i) => i.key === "LD_FINAL_LAUNCH_STATUS")!;
-  const isGo = ldItem.status === "GO_FOR_LAUNCH" && timeConfirmed;
   const completedAt = isGo
     ? new Date(
         Math.max(new Date(ldItem.updatedAt ?? 0).getTime(), (mission.launchCountTimeConfirmedAt ?? new Date(0)).getTime())
       ).toISOString()
     : null;
 
-  res.json({
+  return {
     items,
-    airspaceChecklist: airspaceChecklist(mission),
+    readiness,
     launchCountTime: {
       confirmed: timeConfirmed,
       confirmedAt: mission.launchCountTimeConfirmedAt,
@@ -122,7 +131,15 @@ router.get("/", async (req, res) => {
       projectedLiftoff,
     },
     completion: { isGo, completedAt },
-  });
+  };
+}
+
+router.get("/", async (req, res) => {
+  const mission = await loadMissionForPolls(missionId(req));
+  if (!mission) return res.status(404).json({ error: "Mission not found" });
+
+  const state = await computeLscState(mission);
+  res.json({ ...state, airspaceChecklist: airspaceChecklist(mission) });
 });
 
 router.get("/history", async (req, res) => {
@@ -187,6 +204,22 @@ router.post("/launch-count-time", async (req, res) => {
     return res.status(403).json({ error: "Only the assigned Launch Director (or an Admin) may confirm the Launch Count Time." });
   }
 
+  // v7.1.1 Section 2 - once the LSC is already complete, nothing (this
+  // included) may change it.
+  const priorState = await computeLscState(mission);
+  if (priorState.completion.isGo) {
+    return res.status(409).json({ error: "The Launch Status Check is already complete. No further changes are permitted." });
+  }
+
+  // v7.1.1 Section 1, step 4 - defense in depth: the frontend disables
+  // this control until every item is GO (step 2), but the server rejects
+  // it too regardless of how the request was made.
+  if (!priorState.readiness.allGo) {
+    return res.status(409).json({
+      error: `LAUNCH STATUS CHECK BLOCKED — THE FOLLOWING ITEMS ARE NOT GO: ${priorState.readiness.notGoItems.join(", ")}`,
+    });
+  }
+
   const projectedLiftoff = computeProjectedLiftoff(mission, mission.holds);
   if (!projectedLiftoff) {
     return res.status(400).json({ error: "The Launch Clock has no projected liftoff time to confirm against yet." });
@@ -249,6 +282,14 @@ router.post("/:itemKey", async (req, res) => {
   const actor = req.user!;
   const isAdmin = actor.role === Role.ADMIN;
 
+  // v7.1.1 Section 2 - post-completion lock: once the LSC is complete, no
+  // item may change, by anyone, including Admin Override.
+  const mission = await loadMissionForPolls(mId);
+  if (!mission) return res.status(404).json({ error: "Mission not found" });
+  if ((await computeLscState(mission)).completion.isGo) {
+    return res.status(409).json({ error: "The Launch Status Check is already complete. No further changes are permitted." });
+  }
+
   if (def.computed) {
     if (!isAdmin) return res.status(403).json({ error: "Airspace is computed automatically from the NOTAM/T-60/T-15 checklist; only an Admin may override it." });
     const updated = await setPollItemValue({ missionId: mId, itemKey: def.key, newValue: parsed.data.status, actorId: actor.id, isOverride: true });
@@ -282,6 +323,12 @@ router.delete("/:itemKey", async (req, res) => {
   if (!def.computed) return res.status(400).json({ error: "This item has no override to clear; set its value directly." });
 
   const mId = missionId(req);
+  const missionForLock = await loadMissionForPolls(mId);
+  if (!missionForLock) return res.status(404).json({ error: "Mission not found" });
+  if ((await computeLscState(missionForLock)).completion.isGo) {
+    return res.status(409).json({ error: "The Launch Status Check is already complete. No further changes are permitted." });
+  }
+
   const existing = await prisma.pollItem.findUnique({ where: { missionId_itemKey: { missionId: mId, itemKey: def.key } } });
   if (!existing) return res.status(404).json({ error: "No override currently in effect for this item." });
 

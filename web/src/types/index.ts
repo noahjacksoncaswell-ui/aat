@@ -618,6 +618,11 @@ export interface PollItemState {
 export interface LaunchStatusCheckState {
   items: PollItemState[];
   airspaceChecklist: { notamFiled: boolean; t60Complete: boolean; t15Complete: boolean };
+  // v7.1.1 Section 1 - whether every item (LWCC excluded) currently reads
+  // its own GO/proceed/clear equivalent, and which don't yet. The single
+  // source of truth for whether the Launch Count Time Confirmation may be
+  // attempted.
+  readiness: { allGo: boolean; notGoItems: string[] };
   launchCountTime: {
     confirmed: boolean;
     confirmedAt: string | null;

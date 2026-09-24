@@ -50,3 +50,14 @@ export const POLL_ITEM_CATALOG: PollItemDef[] = [
 export function getPollItemDef(key: string): PollItemDef | undefined {
   return POLL_ITEM_CATALOG.find((i) => i.key === key);
 }
+
+// v7.1.1 Section 1 - every item in the catalog (including
+// LD_FINAL_LAUNCH_STATUS) must read its own affirmative value before the
+// Launch Count Time Confirmation becomes available. Returns each
+// unsatisfied item's display label ("VSE PROPULSION" etc., matching the
+// existing itemKey-as-label convention used in the audit history log).
+export function computeUnsatisfiedItems(items: { key: string; status: string }[]): string[] {
+  return POLL_ITEM_CATALOG.filter((def) => items.find((i) => i.key === def.key)?.status !== def.affirmativeValue).map((def) =>
+    def.key.replace(/_/g, " ")
+  );
+}

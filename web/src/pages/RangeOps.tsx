@@ -6,11 +6,11 @@ import { useMissionSocket } from "../hooks/useSocket";
 import { useLiveClock } from "../hooks/useLiveClock";
 import { usePreferences } from "../context/PreferencesContext";
 import { formatTimestamp } from "../utils/time";
-import { goNoGoTone } from "../components/StatusPill";
 import PersistentClockHeader from "../components/PersistentClockHeader";
 import { ElapsedIndicator, secondsToHms } from "../components/CountdownTab";
 import ClassificationFooter from "../components/ClassificationFooter";
-import type { GoNoGoStatus, Mission } from "../types";
+import { LaunchStatusCheckBoard } from "../components/LaunchStatusCheck";
+import type { Mission } from "../types";
 
 /**
  * Revision Directive v5.1 - a new, standalone, read-only big-board display
@@ -98,7 +98,6 @@ export default function RangeOps() {
   });
 
   const activeHold = state?.activeHold?.status === "ACTIVE" ? state.activeHold : null;
-  const finalCall = computeFinalCall(mission?.goNoGoPolls);
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-black text-zinc-100">
@@ -214,24 +213,16 @@ export default function RangeOps() {
               </section>
             )}
 
-            <section className="card p-6">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xl font-bold uppercase tracking-wide">Launch Status Check</div>
-                <div className={`status-pill ${statusPillClass(finalCall)} border-2 px-4 py-2 text-lg`}>LD Final Call: {finalCall.replace("_", " ")}</div>
-              </div>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {mission.goNoGoPolls?.map((poll) => (
-                  <div
-                    key={poll.id}
-                    className={`flex items-center justify-between border px-4 py-3 text-lg ${statusPillClass(poll.status)}`}
-                  >
-                    <span className="font-semibold">{poll.stationName}</span>
-                    <span className="font-bold">{poll.status.replace("_", " ")}</span>
-                  </div>
-                ))}
-                {!mission.goNoGoPolls?.length && <p className="text-zinc-500">No poll stations on record.</p>}
-              </div>
-            </section>
+            {/* v7.1.1 Section 3/4 - a genuine live replica of the Mission
+                Detail Polls tab (same shared component, same data source),
+                not a separately-maintained summary: every item across all
+                four boxes, color-coded, plus the same official completion
+                banner. The prior "LD Final Call" line (computed from Final
+                Launch Status alone) is removed - that was never how LSC
+                completion actually works (Section 1 of the v7.1.1
+                directive). Read-only: Range Ops performs no writes of any
+                kind beyond the mission selector. */}
+            <LaunchStatusCheckBoard mission={mission} missionId={selectedId} readOnly large />
           </div>
         )}
       </div>
@@ -239,17 +230,4 @@ export default function RangeOps() {
       <ClassificationFooter compact />
     </div>
   );
-}
-
-function computeFinalCall(polls: { status: GoNoGoStatus }[] | undefined): GoNoGoStatus {
-  if (!polls || polls.length === 0) return "UNPOLLED";
-  if (polls.some((p) => p.status === "NO_GO")) return "NO_GO";
-  if (polls.some((p) => p.status === "HOLD")) return "HOLD";
-  if (polls.every((p) => p.status === "GO")) return "GO";
-  return "UNPOLLED";
-}
-
-function statusPillClass(status: GoNoGoStatus): string {
-  const tone = goNoGoTone(status);
-  return `status-${tone}`;
 }
