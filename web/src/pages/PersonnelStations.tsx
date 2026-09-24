@@ -17,6 +17,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { formatTimestamp } from "../utils/time";
 import { usePreferences } from "../context/PreferencesContext";
+import { useMissionSocket } from "../hooks/useSocket";
 import { LD_ASSIGNMENT_ATTESTATION_TEXT, offStationOverrideAttestationText } from "../types";
 import type {
   Mission,
@@ -89,6 +90,16 @@ export default function PersonnelStations() {
     qc.invalidateQueries({ queryKey: ["mission-personnel-history", selectedMissionId] });
     qc.invalidateQueries({ queryKey: ["mission", selectedMissionId] });
   }
+
+  // v7.0.1 Section 2.2 - the ON STATION table (and everything else derived
+  // from mission-personnel assignment state on this page) previously only
+  // refreshed on this client's own mutations, so a change made elsewhere
+  // (the sidebar check-in control, another viewer's session) required a
+  // manual page reload to appear here. broadcastMissionUpdate is already
+  // fired by every mission-personnel route (assignment, station toggle,
+  // override) - this just subscribes to it, the same live-update mechanism
+  // already used by Mission Detail's countdown/LWCC tabs.
+  useMissionSocket(selectedMissionId || undefined, invalidateMission);
 
   return (
     <div className="space-y-6 p-8">
