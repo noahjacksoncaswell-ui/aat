@@ -137,18 +137,18 @@ export default function RangeOps() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      <div className="flex-1 overflow-y-auto px-6 py-4">
         {!selectedId || !mission ? (
           <div className="flex h-full flex-col items-center justify-center text-center text-zinc-500">
             <div className="text-2xl font-bold uppercase tracking-wide text-zinc-400">No Mission Selected</div>
             <p className="mt-2 text-sm">Select a mission above to bring up its live status.</p>
           </div>
         ) : (
-          <div className="mx-auto max-w-[1600px] space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800 pb-4">
+          <div className="mx-auto max-w-[1600px] space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800 pb-2">
               <div>
-                <div className="text-4xl font-bold uppercase tracking-wide">{mission.name}</div>
-                <div className="mt-1 text-lg text-zinc-400">
+                <div className="text-3xl font-bold uppercase tracking-wide">{mission.name}</div>
+                <div className="text-base text-zinc-400">
                   {mission.designator} · {mission.vehicle.name} · {mission.site.name}
                 </div>
               </div>
@@ -156,26 +156,26 @@ export default function RangeOps() {
                   instance (v5.3 Section 2), placed here for this page
                   specifically; the sidebar instance itself is untouched. */}
               <div className="flex items-center gap-4">
-                <div className={`border px-4 py-2 text-center ${useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
+                <div className={`border px-4 py-1.5 text-center ${useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
                   <div className="text-[10px] uppercase tracking-wide text-zinc-500">UTC</div>
-                  <div className="font-mono text-2xl tabular-nums text-zinc-100">{utcTime}</div>
+                  <div className="font-mono text-xl tabular-nums text-zinc-100">{utcTime}</div>
                 </div>
-                <div className={`border px-4 py-2 text-center ${!useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
+                <div className={`border px-4 py-1.5 text-center ${!useZulu ? "border-aat-caution" : "border-zinc-700"}`}>
                   <div className="text-[10px] uppercase tracking-wide text-zinc-500">Local</div>
-                  <div className="font-mono text-2xl tabular-nums text-zinc-100">{localTime}</div>
+                  <div className="font-mono text-xl tabular-nums text-zinc-100">{localTime}</div>
                 </div>
-                <div className="text-lg font-semibold uppercase tracking-wide text-zinc-400">{mission.status.replace("_", " ")}</div>
+                <div className="text-base font-semibold uppercase tracking-wide text-zinc-400">{mission.status.replace("_", " ")}</div>
               </div>
             </div>
 
             <PersistentClockHeader mission={mission} large abbreviated />
 
             {activeHold && (
-              <section className="card border-2 border-aat-caution bg-aat-caution/10 p-6">
+              <section className="card border-2 border-aat-caution bg-aat-caution/10 p-3">
                 {/* v5.4 Section 2 - sized to match the LWCC banner below
                     (text-xl header, text-base body) on this page only; the
                     Countdown tab's own hold banner is untouched. */}
-                <div className="text-xl">
+                <div className="text-base">
                   <strong>ACTIVE HOLD</strong> at T-{secondsToHms(activeHold.holdMarkSeconds)} — {activeHold.type}
                   {activeHold.reason ? ` — ${activeHold.reason}` : ""}
                 </div>
@@ -183,16 +183,16 @@ export default function RangeOps() {
                   <ElapsedIndicator
                     startedAt={activeHold.actualStartedAt}
                     estimatedSeconds={activeHold.estimatedDurationSeconds ?? undefined}
-                    textClassName="mt-2 text-base"
+                    textClassName="mt-1 text-sm"
                   />
                 )}
               </section>
             )}
 
             {lwcc && (
-              <section className={`card p-6 ${lwcc.bannerStatus === "VIOLATION" ? "border-2 border-aat-nogo/60 bg-aat-nogo/5" : "border-2 border-aat-go/50 bg-aat-go/5"}`}>
+              <section className={`card p-3 ${lwcc.bannerStatus === "VIOLATION" ? "border-2 border-aat-nogo/60 bg-aat-nogo/5" : "border-2 border-aat-go/50 bg-aat-go/5"}`}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-xl font-bold uppercase tracking-wide">
+                  <div className="text-base font-bold uppercase tracking-wide">
                     LWCC Compliance Status:{" "}
                     <span className={lwcc.bannerStatus === "VIOLATION" ? "text-aat-nogo" : "text-aat-go"}>{lwcc.bannerStatus.replace("_", " ")}</span>
                   </div>
@@ -201,9 +201,9 @@ export default function RangeOps() {
                   )}
                 </div>
                 {lwcc.bannerStatus === "VIOLATION" && (
-                  <ul className="mt-3 space-y-1.5">
+                  <ul className="mt-2 space-y-1">
                     {lwcc.violatingRows.map((r) => (
-                      <li key={r.no} className="font-mono text-base">
+                      <li key={r.no} className="font-mono text-sm">
                         — LWCCR {r.no} ({r.description}){r.currentValue != null ? ` — CURRENT: ${r.currentValue.toFixed(1)}` : ""}
                         {r.holdExpiresAt ? ` — HOLD ACTIVE, expires ${formatTimestamp(r.holdExpiresAt, useZulu)}` : ""}
                       </li>

@@ -8,6 +8,10 @@ export interface PollItemDef {
   key: string;
   box: PollBoxRole;
   label: string;
+  /** v7.1.2 - a shorter label for Range Ops Display's compact tiles, where
+   * the full label wouldn't fit. Falls back to `label` when omitted (every
+   * label here is already short enough except LCS's). */
+  shortLabel?: string;
   allowedValues: string[];
   /** The value an Admin's one-click override control forces this item to. */
   affirmativeValue: string;
@@ -25,7 +29,7 @@ export const POLL_ITEM_CATALOG: PollItemDef[] = [
   { key: "VSE_STAGING", box: "VSE", label: "Staging", allowedValues: STANDARD, affirmativeValue: "GO" },
   { key: "VSE_RECOVERY", box: "VSE", label: "Recovery", allowedValues: STANDARD, affirmativeValue: "GO" },
   { key: "VSE_PAD", box: "VSE", label: "Pad", allowedValues: STANDARD, affirmativeValue: "GO" },
-  { key: "VSE_LCS", box: "VSE", label: "LCS (Launch Control System)", allowedValues: STANDARD, affirmativeValue: "GO" },
+  { key: "VSE_LCS", box: "VSE", label: "LCS (Launch Control System)", shortLabel: "LCS", allowedValues: STANDARD, affirmativeValue: "GO" },
   { key: "VSE_LOIS", box: "VSE", label: "LOIS", allowedValues: STANDARD, affirmativeValue: "GO" },
   { key: "LWO_WEATHER", box: "LWO", label: "Weather", allowedValues: ["UNPOLLED", "CLEAR", "NOT_CLEAR", "HOLD"], affirmativeValue: "CLEAR" },
   { key: "RC_COMMUNICATIONS", box: "RC", label: "Communications", allowedValues: STANDARD, affirmativeValue: "GO" },

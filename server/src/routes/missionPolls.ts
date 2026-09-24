@@ -94,6 +94,7 @@ async function computeLscState(mission: MissionForPolls, now: Date = new Date())
       key: def.key,
       box: def.box,
       label: def.label,
+      shortLabel: def.shortLabel ?? def.label,
       status,
       isOverridden: def.computed ? !!stored : false,
       updatedByName: stored?.updatedBy?.name ?? null,

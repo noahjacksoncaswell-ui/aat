@@ -92,17 +92,17 @@ export function RoleBoxShell({
   children: React.ReactNode;
 }) {
   return (
-    <section className={`card p-5 ${isOwn ? "border-2 border-aat-accent" : ""}`}>
-      <div className="mb-3 flex items-center justify-between">
+    <section className={`card ${large ? "p-3" : "p-5"} ${isOwn ? "border-2 border-aat-accent" : ""}`}>
+      <div className={`flex items-center justify-between ${large ? "mb-2" : "mb-3"}`}>
         <div>
-          <div className={`font-bold uppercase tracking-wide ${large ? "text-lg" : "text-sm"}`}>{boxLabel}</div>
-          <div className={`${large ? "text-sm" : "text-xs"} ${assignmentName === "UNASSIGNED" ? "text-aat-nogo" : "text-zinc-500"}`}>
+          <div className={`font-bold uppercase tracking-wide ${large ? "text-sm" : "text-sm"}`}>{boxLabel}</div>
+          <div className={`${large ? "text-[11px]" : "text-xs"} ${assignmentName === "UNASSIGNED" ? "text-aat-nogo" : "text-zinc-500"}`}>
             {assignmentName}
           </div>
         </div>
         {indicator}
       </div>
-      <div className="space-y-2">{children}</div>
+      <div className={large ? "space-y-1" : "space-y-2"}>{children}</div>
     </section>
   );
 }
@@ -184,6 +184,23 @@ export function PollItemRow({
           {updatedAt ? `, ${formatTimestamp(updatedAt, useZulu ?? true)}` : ""}
         </div>
       )}
+    </div>
+  );
+}
+
+// v7.1.2 - Range Ops Display only: a small, dense, entirely color-coded
+// block (its own background/border/text color IS the status indicator -
+// no separate floating badge, no dropdown). Used instead of PollItemRow
+// when readOnly, arranged in a compact grid per box so a role's full item
+// set is a small cluster of tiles rather than one full-width line per
+// item - that's what makes the whole board fit on one screen.
+function PollItemTile({ label, status, style }: { label: string; status: string; style?: React.CSSProperties }) {
+  return (
+    <div
+      style={style}
+      className={`status-pill status-${pollStatusTone(status)} flex h-full w-full flex-col items-center justify-center gap-0 px-2 py-6 text-center text-lg font-bold uppercase leading-tight`}
+    >
+      {label}
     </div>
   );
 }
@@ -524,67 +541,108 @@ export function LaunchStatusCheckBoard({
     );
   }
 
+  // v7.1.3 - Range Ops Display only: per-role grouping removed per direct
+  // correction ("doesn't need to be broken up by person; just make all the
+  // tiles in a grid together, with a standard size for all tiles"). Every
+  // item except the LD's decision sits in one flat, uniformly-sized grid;
+  // the LD's Final Launch Status is called out separately at the bottom,
+  // since it's the decision the whole check culminates in. The Polls tab
+  // (readOnly false) is completely unchanged - still four role boxes.
+  const allTileKeys = [
+    "VSE_PROPULSION",
+    "VSE_AVIONICS",
+    "VSE_TELEMETRY",
+    "VSE_STAGING",
+    "VSE_RECOVERY",
+    "VSE_PAD",
+    "VSE_LCS",
+    "VSE_LOIS",
+    "LWO_WEATHER",
+    "RC_COMMUNICATIONS",
+    "RC_OPS_SUPPORT",
+    "RC_AIRSPACE",
+    "RC_RANGE_STATUS",
+  ];
+
   return (
     <div className={readOnly ? "space-y-3" : "mx-auto max-w-4xl space-y-4"}>
       <CompletionBanner check={check} useZulu={useZulu} large={large} />
 
-      <RoleBoxShell
-        boxLabel={POLL_BOX_LABELS.VSE}
-        assignmentName={vse.assignment?.userName ?? "UNASSIGNED"}
-        isOwn={vse.isOwn}
-        large={large}
-        indicator={<OnStationIndicator assignment={vse.assignment} within24h={within24h} />}
-      >
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Vehicle Systems</div>
-        {["VSE_PROPULSION", "VSE_AVIONICS", "VSE_TELEMETRY", "VSE_STAGING", "VSE_RECOVERY"].map((key) => row(key, vse, STANDARD_OPTIONS, "GO"))}
-        <div className="mb-1 mt-3 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Ground Systems</div>
-        {["VSE_PAD", "VSE_LCS", "VSE_LOIS"].map((key) => row(key, vse, STANDARD_OPTIONS, "GO"))}
-      </RoleBoxShell>
+      {readOnly ? (
+        // 4x4 grid (16 cells): the 14 non-LD items fill cells 1-14 (rows
+        // 1-3 full, row 4 cols 1-2); the LD's Final Launch Status - the
+        // decision the whole check culminates in - takes the remaining
+        // two cells of row 4 (cols 3-4) as one combined, double-wide tile.
+        <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
+          <PollItemTile label="LWCC" status={lwcc ? (lwcc.bannerStatus === "VIOLATION" ? "NO_GO" : "GO") : "UNPOLLED"} />
+          {allTileKeys.map((key) => (
+            <PollItemTile key={key} label={itemFor(key).shortLabel} status={itemFor(key).status} />
+          ))}
+          <PollItemTile
+            label="LD — Final Launch Status"
+            status={itemFor("LD_FINAL_LAUNCH_STATUS").status}
+            style={{ gridColumn: "span 2" }}
+          />
+        </div>
+      ) : (
+        <>
+          <RoleBoxShell
+            boxLabel={POLL_BOX_LABELS.VSE}
+            assignmentName={vse.assignment?.userName ?? "UNASSIGNED"}
+            isOwn={vse.isOwn}
+            large={large}
+            indicator={<OnStationIndicator assignment={vse.assignment} within24h={within24h} />}
+          >
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Vehicle Systems</div>
+            {["VSE_PROPULSION", "VSE_AVIONICS", "VSE_TELEMETRY", "VSE_STAGING", "VSE_RECOVERY"].map((key) => row(key, vse, STANDARD_OPTIONS, "GO"))}
+            <div className="mb-1 mt-3 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Ground Systems</div>
+            {["VSE_PAD", "VSE_LCS", "VSE_LOIS"].map((key) => row(key, vse, STANDARD_OPTIONS, "GO"))}
+          </RoleBoxShell>
 
-      <RoleBoxShell
-        boxLabel={POLL_BOX_LABELS.LWO}
-        assignmentName={lwo.assignment?.userName ?? "UNASSIGNED"}
-        isOwn={lwo.isOwn}
-        large={large}
-        indicator={<OnStationIndicator assignment={lwo.assignment} within24h={within24h} />}
-      >
-        <LwccReadoutRow lwcc={lwcc} large={large} />
-        {row("LWO_WEATHER", lwo, WEATHER_OPTIONS, "CLEAR")}
-      </RoleBoxShell>
+          <RoleBoxShell
+            boxLabel={POLL_BOX_LABELS.LWO}
+            assignmentName={lwo.assignment?.userName ?? "UNASSIGNED"}
+            isOwn={lwo.isOwn}
+            large={large}
+            indicator={<OnStationIndicator assignment={lwo.assignment} within24h={within24h} />}
+          >
+            <LwccReadoutRow lwcc={lwcc} large={large} />
+            {row("LWO_WEATHER", lwo, WEATHER_OPTIONS, "CLEAR")}
+          </RoleBoxShell>
 
-      <RoleBoxShell
-        boxLabel={POLL_BOX_LABELS.RC}
-        assignmentName={rc.assignment?.userName ?? "UNASSIGNED"}
-        isOwn={rc.isOwn}
-        large={large}
-        indicator={<OnStationIndicator assignment={rc.assignment} within24h={within24h} />}
-      >
-        {row("RC_COMMUNICATIONS", rc, STANDARD_OPTIONS, "GO")}
-        {row("RC_OPS_SUPPORT", rc, STANDARD_OPTIONS, "GO")}
-        <AirspaceRow
-          item={itemFor("RC_AIRSPACE")}
-          checklist={check.airspaceChecklist}
-          isAdmin={effectiveIsAdmin}
-          missionId={missionId}
-          onChanged={invalidate}
-          readOnly={readOnly}
-          large={large}
-        />
-        {row("RC_RANGE_STATUS", rc, RANGE_STATUS_OPTIONS, "CLEAR_TO_PROCEED")}
-      </RoleBoxShell>
+          <RoleBoxShell
+            boxLabel={POLL_BOX_LABELS.RC}
+            assignmentName={rc.assignment?.userName ?? "UNASSIGNED"}
+            isOwn={rc.isOwn}
+            large={large}
+            indicator={<OnStationIndicator assignment={rc.assignment} within24h={within24h} />}
+          >
+            {row("RC_COMMUNICATIONS", rc, STANDARD_OPTIONS, "GO")}
+            {row("RC_OPS_SUPPORT", rc, STANDARD_OPTIONS, "GO")}
+            <AirspaceRow
+              item={itemFor("RC_AIRSPACE")}
+              checklist={check.airspaceChecklist}
+              isAdmin={effectiveIsAdmin}
+              missionId={missionId}
+              onChanged={invalidate}
+              readOnly={readOnly}
+              large={large}
+            />
+            {row("RC_RANGE_STATUS", rc, RANGE_STATUS_OPTIONS, "CLEAR_TO_PROCEED")}
+          </RoleBoxShell>
 
-      <RoleBoxShell
-        boxLabel={POLL_BOX_LABELS.LD}
-        assignmentName={ld.assignment?.userName ?? "UNASSIGNED"}
-        isOwn={ld.isOwn}
-        large={large}
-        indicator={<OnStationIndicator assignment={ld.assignment} within24h={within24h} />}
-      >
-        {row("LD_FINAL_LAUNCH_STATUS", ld, FINAL_STATUS_OPTIONS, "GO_FOR_LAUNCH")}
-        {!readOnly && (
-          <LaunchCountTimeBlock missionId={missionId} check={check} canEdit={ld.canEdit} isAdmin={effectiveIsAdmin} useZulu={useZulu} onChanged={invalidate} />
-        )}
-      </RoleBoxShell>
+          <RoleBoxShell
+            boxLabel={POLL_BOX_LABELS.LD}
+            assignmentName={ld.assignment?.userName ?? "UNASSIGNED"}
+            isOwn={ld.isOwn}
+            large={large}
+            indicator={<OnStationIndicator assignment={ld.assignment} within24h={within24h} />}
+          >
+            {row("LD_FINAL_LAUNCH_STATUS", ld, FINAL_STATUS_OPTIONS, "GO_FOR_LAUNCH")}
+            <LaunchCountTimeBlock missionId={missionId} check={check} canEdit={ld.canEdit} isAdmin={effectiveIsAdmin} useZulu={useZulu} onChanged={invalidate} />
+          </RoleBoxShell>
+        </>
+      )}
 
       {showHistory && <PollHistoryPanel history={history} useZulu={useZulu} />}
     </div>

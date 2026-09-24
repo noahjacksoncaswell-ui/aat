@@ -609,6 +609,8 @@ export interface PollItemState {
   key: string;
   box: PollBoxRole;
   label: string;
+  // v7.1.2 - a shorter label for Range Ops Display's compact tiles.
+  shortLabel: string;
   status: string;
   isOverridden: boolean;
   updatedByName: string | null;
