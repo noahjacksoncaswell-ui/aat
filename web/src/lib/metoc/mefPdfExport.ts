@@ -132,7 +132,7 @@ export function buildMefPdf(mef: MetocMefResponse): jsPDF {
     printLine(twoCol(`Temp (A/H/L): ${tempStr}`, `Distributed Weather: ${precipBucket}`));
     printLine(twoCol(`Dew/Humidity: ${dewStr}`, `Precipitation: ${precipBucket}`));
     printLine(twoCol(`Weather/Visibility: ${day.shortForecast ?? "-"} / -`, "Upper-Level Wind-Shear: N/A - Not Sourced"));
-    printLine(twoCol(`Launch Winds: ${windStr}`, "Solar Activity: N/A - Not Sourced"));
+    printLine(twoCol(`Launch Winds: ${windStr}`, `Solar Activity: ${day.solarActivity ?? "N/A - Not Sourced"}`));
     printLine(`Coverage: ${day.coverage}`);
     printLine("Type: -");
     printLine("Base (ft): -");
@@ -149,7 +149,7 @@ export function buildMefPdf(mef: MetocMefResponse): jsPDF {
   );
   y += lineHeight / 3;
   printWrapped(
-    "2. Cloud Type, Cloud Base, Cloud Tops, Upper-Level Wind Shear, and Solar Activity are not carried by the source forecast product and are marked N/A - Not Sourced rather than estimated."
+    "2. Cloud Type, Cloud Base, Cloud Tops, and Upper-Level Wind Shear are not carried by the source forecast product and are marked N/A - Not Sourced rather than estimated. Solar Activity, where shown, is sourced from NOAA SWPC's planetary K-index rather than estimated."
   );
   y += lineHeight / 3;
   printWrapped("3. THIS DOCUMENT IS UNOFFICIAL AND AUTO-GENERATED. IT HAS NOT BEEN REVIEWED OR APPROVED BY THE LAUNCH WEATHER OFFICER.", { bold: true });

@@ -87,11 +87,12 @@ const SCOPED_RULES: ScopedRule[] = [
   },
   {
     no: 9,
-    // The forecast product does not distinguish gust from sustained speed;
-    // sustained speed is used as a conservative proxy (documented above).
+    // v8.2 Section 4 - the NWS gridpoint forecast's own windGust field is
+    // now surfaced (metoc.ts getForecastGridDetail); prefer it when present
+    // instead of the sustained-speed proxy this previously had to use.
     label: "Wind Gust / Shear Rule",
     severity: (day) => {
-      const kts = parseWindKts(day.windSpeedText);
+      const kts = day.windGustMph != null ? day.windGustMph * 0.868976 : parseWindKts(day.windSpeedText);
       if (kts == null) return undefined;
       const threshold = getRequirement(9).threshold!; // 30 kt
       return ramp(kts, threshold - 8, threshold + 4);

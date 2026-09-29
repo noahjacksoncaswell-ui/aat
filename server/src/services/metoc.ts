@@ -42,8 +42,12 @@ export interface LocationInfo {
   county?: string;
   state?: string;
   gridId?: string;
+  gridX?: number;
+  gridY?: number;
+  cwa?: string; // NWS County Warning Area / WFO identifier (e.g. "FFC") - v8.2 Section 5, for the Area Forecast Discussion lookup
   forecastUrl?: string;
   forecastHourlyUrl?: string;
+  forecastGridDataUrl?: string;
   stationId?: string; // nearest METAR-style observation station, for the MEF "Station:" field
 }
 
@@ -56,8 +60,12 @@ export async function resolveLocationInfo(lat: number, lon: number): Promise<Loc
     city: props.relativeLocation?.properties?.city,
     state: props.relativeLocation?.properties?.state,
     gridId: props.gridId,
+    gridX: props.gridX,
+    gridY: props.gridY,
+    cwa: props.cwa,
     forecastUrl: props.forecast,
     forecastHourlyUrl: props.forecastHourly,
+    forecastGridDataUrl: props.forecastGridData,
   };
   if (props.county) {
     try {
@@ -83,6 +91,7 @@ export interface HourlyForecastPoint {
   temperatureF?: number;
   windSpeedText?: string;
   windDirectionDeg?: string;
+  windGustMph?: number;
   precipitationProbabilityPct?: number;
   shortForecast?: string;
 }
@@ -94,9 +103,90 @@ export interface DailyForecastEntry {
   tempLowF?: number;
   windSpeedText?: string;
   windDirectionDeg?: string;
+  windGustMph?: number;
+  skyCoverPct?: number;
   precipitationProbabilityPct?: number;
   shortForecast?: string;
   detailedForecast?: string;
+}
+
+interface GridTimeSeriesValue {
+  validTime: string; // ISO8601 interval, e.g. "2026-10-03T12:00:00+00:00/PT6H"
+  value: number | null;
+}
+
+/**
+ * v8.2 Section 4 - additional aviation-relevant fields the NWS gridpoint
+ * forecast (forecastGridData) already returns but the original Tier a/b
+ * build didn't surface: wind gust and sky cover percentage. Same NWS
+ * integration already established (Section 2.5 of the v8.0 directive) -
+ * this reads a product this app already depends on, not a new source.
+ * Returns per-date aggregates (max gust, average sky cover for daytime
+ * hours) keyed by YYYY-MM-DD so callers can merge them onto existing
+ * hourly/daily entries without restructuring those.
+ */
+export async function getForecastGridDetail(
+  forecastGridDataUrl: string
+): Promise<{ byDate: Map<string, { maxGustMph?: number; avgSkyCoverPct?: number }>; hourly: Map<string, { gustMph?: number; skyCoverPct?: number }> }> {
+  const data = await nwsGet(forecastGridDataUrl);
+  const props = data.properties ?? {};
+
+  function expandSeries(series: { values?: GridTimeSeriesValue[] } | undefined, convert: (v: number) => number): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const entry of series?.values ?? []) {
+      if (entry.value == null) continue;
+      const [startStr, durationStr] = entry.validTime.split("/");
+      const start = new Date(startStr);
+      const hours = parseIsoDurationHours(durationStr);
+      for (let h = 0; h < hours; h++) {
+        const t = new Date(start.getTime() + h * 3600 * 1000);
+        out.set(t.toISOString().slice(0, 13), convert(entry.value)); // keyed to the hour
+      }
+    }
+    return out;
+  }
+
+  const kmhToMph = (v: number) => v * 0.621371;
+  const gustByHour = expandSeries(props.windGust, kmhToMph);
+  const skyCoverByHour = expandSeries(props.skyCover, (v) => v); // already percent
+
+  const hourly = new Map<string, { gustMph?: number; skyCoverPct?: number }>();
+  const allHourKeys = new Set([...gustByHour.keys(), ...skyCoverByHour.keys()]);
+  for (const key of allHourKeys) {
+    hourly.set(key, { gustMph: gustByHour.get(key), skyCoverPct: skyCoverByHour.get(key) });
+  }
+
+  const byDate = new Map<string, { maxGustMph?: number; avgSkyCoverPct?: number }>();
+  const gustsByDate = new Map<string, number[]>();
+  const skyByDate = new Map<string, number[]>();
+  for (const [hourKey, gust] of gustByHour) {
+    const date = hourKey.slice(0, 10);
+    (gustsByDate.get(date) ?? gustsByDate.set(date, []).get(date)!).push(gust);
+  }
+  for (const [hourKey, sky] of skyCoverByHour) {
+    const date = hourKey.slice(0, 10);
+    (skyByDate.get(date) ?? skyByDate.set(date, []).get(date)!).push(sky);
+  }
+  const allDates = new Set([...gustsByDate.keys(), ...skyByDate.keys()]);
+  for (const date of allDates) {
+    const gusts = gustsByDate.get(date);
+    const skies = skyByDate.get(date);
+    byDate.set(date, {
+      maxGustMph: gusts?.length ? Math.max(...gusts) : undefined,
+      avgSkyCoverPct: skies?.length ? Math.round(skies.reduce((a, b) => a + b, 0) / skies.length) : undefined,
+    });
+  }
+  return { byDate, hourly };
+}
+
+function parseIsoDurationHours(iso: string): number {
+  // NWS grid durations are simple PT#H / P#DT#H forms - not a full ISO8601
+  // duration parser, just what this product actually emits.
+  const dayMatch = iso.match(/P(?:(\d+)D)?T?(?:(\d+)H)?/);
+  if (!dayMatch) return 1;
+  const days = Number(dayMatch[1] ?? 0);
+  const hours = Number(dayMatch[2] ?? 0);
+  return Math.max(1, days * 24 + hours);
 }
 
 /** Tier (a) - 3-Day Detailed Outlook: hourly resolution from forecastHourly, first 72 hours. */
@@ -261,18 +351,37 @@ const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "Ju
  * normals period). Queried by a small bounding box around the site to find
  * the nearest reporting station's monthly normals, rather than requiring a
  * pre-known station ID (this app has no static station database).
+ *
+ * v8.2 Section 2 fix - the original request 400'd. Root-caused via live
+ * research against NCEI's own documented examples (this sandbox cannot
+ * reach ncei.noaa.gov directly to test): the geographic filter parameter
+ * is `boundingBox`, not `bbox` (the latter isn't a recognized Data Service
+ * v1 parameter at all), and `startDate`/`endDate` are REQUIRED on every
+ * Data Service v1 request regardless of dataset - a documented real
+ * example against this exact dataset uses the sentinel full-range
+ * `startDate=0001-01-01&endDate=9996-12-31` for a date-independent
+ * dataset like monthly normals. `includeStationName`/`includeStationLocation`
+ * are also opt-in (default false) and are required here to get station
+ * identity/coordinates back in each row for nearest-station selection.
  */
 export async function getMonthlyClimateNormals(lat: number, lon: number): Promise<MonthlyClimateNormal[]> {
   const halfDeg = 0.5;
-  const bbox = [lat + halfDeg, lon - halfDeg, lat - halfDeg, lon + halfDeg].join(",");
+  const boundingBox = [lat + halfDeg, lon - halfDeg, lat - halfDeg, lon + halfDeg].join(",");
   const qs = new URLSearchParams({
     dataset: "normals-monthly-1991-2020",
-    bbox,
+    boundingBox,
+    startDate: "0001-01-01",
+    endDate: "9996-12-31",
     format: "json",
     units: "standard",
+    includeStationName: "true",
+    includeStationLocation: "true",
   });
   const res = await fetch(`https://www.ncei.noaa.gov/access/services/data/v1?${qs.toString()}`);
-  if (!res.ok) throw new Error(`NCEI climate normals request failed (${res.status})`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`NCEI climate normals request failed (${res.status})${body ? `: ${body.slice(0, 300)}` : ""}`);
+  }
   const rows = (await res.json()) as any[];
   if (!Array.isArray(rows) || rows.length === 0) throw new Error("NCEI climate normals returned no stations for this location");
 

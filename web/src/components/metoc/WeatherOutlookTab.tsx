@@ -46,6 +46,8 @@ export default function WeatherOutlookTab({ outlook, loading }: { outlook: Metoc
                   <th className="py-1 pr-3">Time</th>
                   <th className="py-1 pr-3">Temp (°F)</th>
                   <th className="py-1 pr-3">Wind</th>
+                  <th className="py-1 pr-3">Gust (mph)</th>
+                  <th className="py-1 pr-3">Sky Cover %</th>
                   <th className="py-1 pr-3">Precip %</th>
                   <th className="py-1 pr-3">Forecast</th>
                 </tr>
@@ -58,6 +60,8 @@ export default function WeatherOutlookTab({ outlook, loading }: { outlook: Metoc
                     <td className="py-1 pr-3">
                       {p.windDirectionDeg ?? ""} {p.windSpeedText ?? "—"}
                     </td>
+                    <td className="py-1 pr-3">{p.windGustMph ?? "—"}</td>
+                    <td className="py-1 pr-3">{p.skyCoverPct ?? "—"}</td>
                     <td className="py-1 pr-3">{p.precipitationProbabilityPct ?? "—"}</td>
                     <td className="py-1 pr-3">{p.shortForecast ?? "—"}</td>
                   </tr>
@@ -66,6 +70,9 @@ export default function WeatherOutlookTab({ outlook, loading }: { outlook: Metoc
             </table>
           </div>
         )}
+        <p className="mt-2 text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-600">
+          METAR / TAF / PIREP / SIGMET / WINDS ALOFT — SEE 24-HOUR AVIATION BRIEF TAB.
+        </p>
       </section>
 
       {/* Tier (b) - 7-Day Detailed Outlook */}
@@ -83,6 +90,8 @@ export default function WeatherOutlookTab({ outlook, loading }: { outlook: Metoc
                   <th className="py-1 pr-3">Day</th>
                   <th className="py-1 pr-3">High/Low</th>
                   <th className="py-1 pr-3">Wind</th>
+                  <th className="py-1 pr-3">Gust (mph)</th>
+                  <th className="py-1 pr-3">Sky Cover %</th>
                   <th className="py-1 pr-3">Precip %</th>
                   <th className="py-1 pr-3">Forecast</th>
                   <th className="py-1 pr-3">PoV</th>
@@ -98,6 +107,8 @@ export default function WeatherOutlookTab({ outlook, loading }: { outlook: Metoc
                     <td className="py-1 pr-3">
                       {d.windDirectionDeg ?? ""} {d.windSpeedText ?? "—"}
                     </td>
+                    <td className="py-1 pr-3">{d.windGustMph ?? "—"}</td>
+                    <td className="py-1 pr-3">{d.skyCoverPct ?? "—"}</td>
                     <td className="py-1 pr-3">{d.precipitationProbabilityPct ?? "—"}</td>
                     <td className="py-1 pr-3">{d.shortForecast ?? "—"}</td>
                     <td className="py-1 pr-3">
@@ -136,8 +147,8 @@ export default function WeatherOutlookTab({ outlook, loading }: { outlook: Metoc
         <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           Tier C — ~30-Day Climate Outlook (NOAA CPC, Probabilistic)
         </div>
-        <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
-          A categorical/probabilistic trend, not a day-specific forecast — NOAA's Climate Prediction Center does not issue deterministic point forecasts at this range.
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          CATEGORICAL/PROBABILISTIC OUTLOOK — NOT A DAY-SPECIFIC FORECAST.
         </p>
         {outlook.tierC.status === "UNAVAILABLE" ? (
           <TierUnavailable error={outlook.tierC.error} />

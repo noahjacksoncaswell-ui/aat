@@ -39,10 +39,7 @@ export default function TrendWindowTab({ loc, outlook }: { loc: MetocLocationPar
       {/* Section 3.1 - PoV Trend Log */}
       <section className="card p-5">
         <div className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">PoV Trend Log</div>
-        <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-          A stored history of this date's computed PoV, one snapshot per page load, so a Launch Weather Officer can see how the risk
-          assessment for an upcoming date has moved as the launch period approaches.
-        </p>
+        <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">ONE SNAPSHOT PER PAGE LOAD.</p>
         {tierBDays.length === 0 ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">The 7-day detailed outlook is unavailable for this location, so no dates are available to trend.</p>
         ) : (
@@ -86,9 +83,8 @@ export default function TrendWindowTab({ loc, outlook }: { loc: MetocLocationPar
       {/* Section 3.2 - Launch Window Favorability Analysis */}
       <section className="card p-5">
         <div className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Launch Window Favorability Analysis</div>
-        <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-          Derived from 30-year climate normals for this location — a reference for which months are historically favorable, not a
-          per-day forecast. Complementary to the near-term PoV trend above, not a substitute for it.
+        <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          DERIVED FROM 30-YEAR CLIMATE NORMALS (1991–2020).
         </p>
         {favorabilityError ? (
           <p className="text-sm text-aat-nogo">

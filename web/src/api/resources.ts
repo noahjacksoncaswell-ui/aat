@@ -7,6 +7,7 @@ import type {
   LaunchStatusCheckState,
   LwccState,
   Mission,
+  AviationBriefResponse,
   MetocMefResponse,
   MetocOutlookResponse,
   MetocMonthFavorability,
@@ -201,6 +202,8 @@ export const fetchMetocPovTrend = (loc: MetocLocationParams, date: string) =>
   api.get<MetocPovTrendPoint[]>("/metoc/pov-trend", { params: { ...metocParams(loc), date } }).then((r) => r.data);
 export const fetchMetocFavorability = (loc: MetocLocationParams) =>
   api.get<MetocMonthFavorability[]>("/metoc/favorability", { params: metocParams(loc) }).then((r) => r.data);
+export const fetchMetocAviationBrief = (loc: MetocLocationParams) =>
+  api.get<AviationBriefResponse>("/metoc/aviation-brief", { params: metocParams(loc) }).then((r) => r.data);
 export const generateMetocMef = (body: {
   siteId?: string;
   lat?: number;

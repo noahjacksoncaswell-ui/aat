@@ -667,6 +667,8 @@ export interface MetocHourlyPoint {
   temperatureF?: number;
   windSpeedText?: string;
   windDirectionDeg?: string;
+  windGustMph?: number;
+  skyCoverPct?: number;
   precipitationProbabilityPct?: number;
   shortForecast?: string;
 }
@@ -684,6 +686,8 @@ export interface MetocDailyEntry {
   tempLowF?: number;
   windSpeedText?: string;
   windDirectionDeg?: string;
+  windGustMph?: number;
+  skyCoverPct?: number;
   precipitationProbabilityPct?: number;
   shortForecast?: string;
   detailedForecast?: string;
@@ -749,6 +753,85 @@ export interface MetocMefDay {
   coverage: string;
   povPercent: number;
   primaryConcerns: string[];
+  solarActivity?: string;
+}
+
+// v8.2 Section 5 - 24-Hour Aviation Brief
+
+export interface AwcNearestStation {
+  icaoId: string;
+  name?: string;
+  lat: number;
+  lon: number;
+  distanceNm: number;
+}
+
+export interface AwcDecodedMetar {
+  rawText: string;
+  decoded: {
+    temperatureC?: number;
+    dewpointC?: number;
+    windDirectionDeg?: number;
+    windSpeedKt?: number;
+    windGustKt?: number;
+    visibilityMi?: number;
+    altimeterInHg?: number;
+    weatherString?: string;
+    clouds?: string;
+    flightCategory?: string;
+    reportTime?: string;
+  };
+}
+
+export interface AwcTaf {
+  rawText: string;
+  issueTime?: string;
+  validFrom?: string;
+  validTo?: string;
+}
+
+export interface AwcGeoAdvisory {
+  raw?: string;
+  hazard?: string;
+  distanceNm: number | null;
+}
+
+export interface AwcCwa {
+  raw?: string;
+  cwsu?: string;
+  hazard?: string;
+}
+
+export interface FaaTfrEntry {
+  notam: string;
+  facility?: string;
+  state?: string;
+  type?: string;
+  description?: string;
+  detailsUrl?: string;
+}
+
+export interface SpaceWeatherSummary {
+  kpIndex: number;
+  bucket: "Low" | "Moderate" | "High" | "Severe";
+  observedAt: string;
+}
+
+export interface AviationBriefResponse {
+  station: MetocTier<AwcNearestStation>;
+  metars: MetocTier<AwcDecodedMetar[]>;
+  tafs: MetocTier<AwcTaf[]>;
+  pireps: MetocTier<any[]>;
+  sigmets: MetocTier<AwcGeoAdvisory[]>;
+  gairmets: MetocTier<AwcGeoAdvisory[]>;
+  cwas: MetocTier<AwcCwa[]>;
+  areaForecastDiscussion: MetocTier<string>;
+  meteorologicalImpactStatement: MetocTier<string>;
+  tcf: MetocTier<string>;
+  windsAloft: MetocTier<string> & { region?: string };
+  tfrs: MetocTier<FaaTfrEntry[]>;
+  spaceWeather: MetocTier<SpaceWeatherSummary>;
+  externalLinks: { label: string; url: string }[];
 }
 
 export interface MetocMefResponse {

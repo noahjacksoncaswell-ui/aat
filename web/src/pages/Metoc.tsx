@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchMetocOutlook, fetchSites } from "../api/resources";
 import type { MetocLocationParams } from "../api/resources";
+import AviationBriefTab from "../components/metoc/AviationBriefTab";
 import WeatherOutlookTab from "../components/metoc/WeatherOutlookTab";
 import TrendWindowTab from "../components/metoc/TrendWindowTab";
 import MefGeneratorTab from "../components/metoc/MefGeneratorTab";
@@ -20,11 +21,13 @@ import MefGeneratorTab from "../components/metoc/MefGeneratorTab";
 // passed down as props - the three subtab components own no fetching of
 // their own location context.
 
-const SUBTABS = ["Weather Outlook", "Trend & Window Analysis", "MEF Generator"] as const;
+// v8.2 Section 5.1 - 24-Hour Aviation Brief positioned first, before
+// Weather Outlook.
+const SUBTABS = ["24-Hour Aviation Brief", "Weather Outlook", "Trend & Window Analysis", "MEF Products"] as const;
 type Subtab = (typeof SUBTABS)[number];
 
 export default function Metoc() {
-  const [subtab, setSubtab] = useState<Subtab>("Weather Outlook");
+  const [subtab, setSubtab] = useState<Subtab>("24-Hour Aviation Brief");
   const { data: sites } = useQuery({ queryKey: ["sites"], queryFn: () => fetchSites() });
 
   const [siteSelection, setSiteSelection] = useState<string>("");
@@ -165,9 +168,10 @@ export default function Metoc() {
         </div>
       ) : (
         <>
+          {subtab === "24-Hour Aviation Brief" && <AviationBriefTab loc={loadedLocation} />}
           {subtab === "Weather Outlook" && <WeatherOutlookTab outlook={outlook} loading={outlookLoading} />}
           {subtab === "Trend & Window Analysis" && <TrendWindowTab loc={loadedLocation} outlook={outlook} />}
-          {subtab === "MEF Generator" && (
+          {subtab === "MEF Products" && (
             <MefGeneratorTab
               loc={loadedLocation}
               // Derived from the actual selection (loadedLocation/selectedSite), not

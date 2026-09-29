@@ -9,9 +9,26 @@ import {
   getMonthlyClimateNormals,
   getMiddayHourlyDetail,
   deriveCoverageFromForecastText,
+  getForecastGridDetail,
 } from "../services/metoc";
 import { computeDayPov, computeMonthlyFavorability } from "../services/metocPov";
 import { generateForecastDiscussion, toNarrativeDayInput, MetocNarrativeError } from "../services/metocNarrative";
+import {
+  findNearestStation,
+  getMetars,
+  getTafs,
+  getPireps,
+  getAirSigmets,
+  getGAirmets,
+  getCwas,
+  getAreaForecastDiscussion,
+  getMeteorologicalImpactStatement,
+  getTcf,
+  windtempRegionFor,
+  getWindsTempsAloft,
+  getActiveTfrs,
+  getSpaceWeatherSummary,
+} from "../services/aviationWeather";
 
 // v8.0/v8.1 - METOC Outlook. Mounted at /api/metoc.
 
@@ -69,7 +86,7 @@ router.get("/outlook", async (req, res) => {
     return res.status(502).json({ error: `Unable to resolve this location via the NWS point-forecast API: ${err instanceof Error ? err.message : String(err)}` });
   }
 
-  const [tierA, tierBRaw, tierC, tierD] = await Promise.all([
+  const [tierARaw, tierBRaw, tierC, tierD, gridDetail] = await Promise.all([
     locationInfo.forecastHourlyUrl
       ? safeTier(() => getThreeDayHourlyOutlook(locationInfo.forecastHourlyUrl!))
       : Promise.resolve<TierResult<never>>({ status: "UNAVAILABLE", error: "No hourly forecast product for this location" }),
@@ -78,11 +95,37 @@ router.get("/outlook", async (req, res) => {
       : Promise.resolve<TierResult<never>>({ status: "UNAVAILABLE", error: "No forecast product for this location" }),
     safeTier(() => getMonthlyClimateOutlook(loc.lat, loc.lon)),
     safeTier(() => getMonthlyClimateNormals(loc.lat, loc.lon)),
+    // v8.2 Section 4 - wind gust + sky cover, same NWS gridpoint product,
+    // best-effort: a failure here shouldn't take down Tiers a/b themselves,
+    // it just means those two extra fields are absent.
+    locationInfo.forecastGridDataUrl
+      ? safeTier(() => getForecastGridDetail(locationInfo.forecastGridDataUrl!))
+      : Promise.resolve<TierResult<never>>({ status: "UNAVAILABLE", error: "No gridpoint forecast product for this location" }),
   ]);
+
+  let tierA: any = tierARaw;
+  if (tierARaw.status === "OK" && gridDetail.status === "OK") {
+    tierA = {
+      status: "OK",
+      data: tierARaw.data.map((p) => {
+        const hourKey = p.startTime.slice(0, 13);
+        const detail = gridDetail.data.hourly.get(hourKey);
+        return { ...p, windGustMph: detail?.gustMph != null ? Math.round(detail.gustMph) : undefined, skyCoverPct: detail?.skyCoverPct };
+      }),
+    };
+  }
 
   let tierB: any = tierBRaw;
   if (tierBRaw.status === "OK") {
-    const daysWithPov = tierBRaw.data.map((day) => ({ ...day, pov: computeDayPov(day) }));
+    const daysWithPov = tierBRaw.data.map((day) => {
+      const detail = gridDetail.status === "OK" ? gridDetail.data.byDate.get(day.date) : undefined;
+      const enriched = {
+        ...day,
+        windGustMph: detail?.maxGustMph != null ? Math.round(detail.maxGustMph) : undefined,
+        skyCoverPct: detail?.avgSkyCoverPct,
+      };
+      return { ...enriched, pov: computeDayPov(enriched) };
+    });
     tierB = { status: "OK", data: daysWithPov };
 
     // v8.1 Section 3.1 - snapshot each in-window day's PoV on every load, so
@@ -158,6 +201,88 @@ router.get("/favorability", async (req, res) => {
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
   }
+});
+
+// v8.2 Section 5 - 24-Hour Aviation Brief. One aggregated response so the
+// frontend tab is a single fetch; every product resolves independently via
+// safeTier so one AWC product being down never takes the others with it
+// (same fail-closed-per-product pattern as /outlook).
+router.get("/aviation-brief", async (req, res) => {
+  let loc: ResolvedLocation;
+  try {
+    loc = await resolveLocation(req.query);
+  } catch (err: any) {
+    return res.status(err.httpStatus ?? 400).json({ error: err.message });
+  }
+
+  let locationInfo;
+  try {
+    locationInfo = await resolveLocationInfo(loc.lat, loc.lon);
+  } catch (err) {
+    return res.status(502).json({ error: `Unable to resolve this location via the NWS point-forecast API: ${err instanceof Error ? err.message : String(err)}` });
+  }
+
+  const station = await safeTier(() => findNearestStation(loc.lat, loc.lon));
+  const icaoId = station.status === "OK" ? station.data.icaoId : undefined;
+  const region = windtempRegionFor(loc.lat, loc.lon);
+
+  const [metars, tafs, pireps, sigmets, gairmets, cwas, tcf, windsAloft, tfrs, spaceWeather] = await Promise.all([
+    icaoId
+      ? safeTier(() => getMetars(icaoId))
+      : Promise.resolve<TierResult<never>>({ status: "UNAVAILABLE", error: "No nearby AWC-reporting station" }),
+    icaoId
+      ? safeTier(() => getTafs(icaoId))
+      : Promise.resolve<TierResult<never>>({ status: "UNAVAILABLE", error: "No nearby AWC-reporting station" }),
+    icaoId
+      ? safeTier(() => getPireps(icaoId))
+      : Promise.resolve<TierResult<never>>({ status: "UNAVAILABLE", error: "No nearby AWC-reporting station" }),
+    safeTier(() => getAirSigmets(loc.lat, loc.lon)),
+    safeTier(() => getGAirmets(loc.lat, loc.lon)),
+    safeTier(() => getCwas()),
+    safeTier(() => getTcf()),
+    safeTier(() => getWindsTempsAloft(region)),
+    safeTier(() => getActiveTfrs(locationInfo!.state)),
+    safeTier(() => getSpaceWeatherSummary()),
+  ]);
+
+  const afd = locationInfo.cwa
+    ? await safeTier(() => getAreaForecastDiscussion(locationInfo!.cwa!))
+    : ({ status: "UNAVAILABLE", error: "No CWA/WFO identifier resolved for this location" } as TierResult<never>);
+  // v8.2 Section 5.2 - MIS has no reliable coordinate-based CWSU lookup this
+  // build could confirm (ARTCC/CWSU boundaries differ from the NWS WFO/CWA
+  // code already available) - returned as a national list rather than
+  // guessing at a location filter that might silently be wrong.
+  const mis = await safeTier(() => getMeteorologicalImpactStatement());
+
+  res.json({
+    station,
+    metars,
+    tafs,
+    pireps,
+    sigmets,
+    gairmets,
+    cwas,
+    areaForecastDiscussion: afd,
+    meteorologicalImpactStatement: mis,
+    tcf,
+    windsAloft: { ...windsAloft, region },
+    tfrs,
+    spaceWeather,
+    // v8.2 Section 5.5 - complex/graphical-only products, opened externally
+    // rather than force-reimplemented; deep-linked where the target site's
+    // own param contract is confirmed (AWC's own metar/taf pages use the
+    // same `ids` param the Data API documents), left general otherwise
+    // rather than guessing at an unconfirmed query parameter.
+    externalLinks: [
+      { label: "SIGMET / G-AIRMET Graphical Viewer (AWC)", url: "https://aviationweather.gov/gairmet/" },
+      { label: "TFM Convective Forecast, Graphical (AWC)", url: "https://aviationweather.gov/tcf/" },
+      icaoId
+        ? { label: `METAR/TAF Detail — ${icaoId} (AWC)`, url: `https://aviationweather.gov/data/metar/?ids=${icaoId}&std=1` }
+        : { label: "METAR/TAF Data (AWC)", url: "https://aviationweather.gov/data/metar/" },
+      { label: "NWS Graphical Forecast (graphical.weather.gov)", url: "https://graphical.weather.gov/" },
+      { label: "Space Weather Dashboards (SWPC)", url: "https://www.swpc.noaa.gov/communities/aviation-community-dashboard" },
+    ],
+  });
 });
 
 // --- Unofficial MEF Generator (v8.0 Sections 4-6, v8.1 Section 4) ---
@@ -250,6 +375,14 @@ router.post("/mef/generate", async (req, res) => {
     return res.status(502).json({ error: "The NWS forecast product did not return data for every selected day" });
   }
 
+  // v8.2 Section 6 - a real SWPC feed for the MEF's "Solar Activity" field
+  // rather than the estimate it previously had to use. One current
+  // snapshot applied to every day in range (SWPC's own short-range
+  // products don't forecast day-by-day at this granularity either) -
+  // best-effort, falls back to the honest "N/A - Not Sourced" on failure
+  // rather than fabricating a bucket.
+  const spaceWeather = await safeTier(() => getSpaceWeatherSummary());
+
   const perDay = await Promise.all(
     selectedDays.map(async (day) => {
       const pov = computeDayPov(day);
@@ -276,6 +409,7 @@ router.post("/mef/generate", async (req, res) => {
         coverage: deriveCoverageFromForecastText(day.shortForecast),
         povPercent: pov.povPercent,
         primaryConcerns: pov.primaryConcerns,
+        solarActivity: spaceWeather.status === "OK" ? spaceWeather.data.bucket : undefined,
       };
     })
   );
