@@ -28,7 +28,14 @@ export const env = {
   nwsUserAgent: process.env.NWS_USER_AGENT ?? "AAT-LOD-Platform (ops@aat-aerospace.example)",
   openWeatherMapApiKey: process.env.OPENWEATHERMAP_API_KEY || "",
 
+  // v8.0 Section 5 - the METOC Unofficial MEF Generator's Forecast Discussion
+  // narrative. Keyless is not an option here (unlike NWS), so generation is
+  // gated by isAnthropicConfigured() and fails with a clear message rather
+  // than a broken/partial PDF when unset (Section 5's explicit requirement).
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
+
   appBaseUrl: process.env.APP_BASE_URL ?? "http://localhost:5173",
 };
 
 export const isS3Configured = () => Boolean(env.s3AccessKeyId && env.s3SecretAccessKey);
+export const isAnthropicConfigured = () => Boolean(env.anthropicApiKey);

@@ -84,6 +84,8 @@ const navItems = [
   { to: "/faa", label: "FAA Coordination" },
   { to: "/documents", label: "Documentation Library" },
   { to: "/vehicles", label: "Vehicles" },
+  // v8.0 Section 1 - positioned above Trajectory Simulations, below Vehicles.
+  { to: "/metoc", label: "METOC" },
   // v6.0 Section 1 - positioned immediately above Range Ops Display.
   { to: "/trajectory-sim", label: "Trajectory Simulations" },
   // v5.1 Section 2 - available to every role (a display surface, not a

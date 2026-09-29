@@ -7,6 +7,10 @@ import type {
   LaunchStatusCheckState,
   LwccState,
   Mission,
+  MetocMefResponse,
+  MetocOutlookResponse,
+  MetocMonthFavorability,
+  MetocPovTrendPoint,
   MilestoneTemplate,
   MilestoneTemplateOptions,
   MissionPersonnelAssignmentRecord,
@@ -181,6 +185,31 @@ export const uploadDocumentVersion = (id: string, formData: FormData) =>
 export const updateDocumentMeta = (id: string, data: Record<string, unknown>) =>
   api.patch(`/documents/${id}`, data).then((r) => r.data);
 export const deleteDocument = (id: string) => api.delete(`/documents/${id}`);
+
+// METOC Outlook (v8.0/v8.1)
+export interface MetocLocationParams {
+  siteId?: string;
+  lat?: number;
+  lon?: number;
+}
+function metocParams(loc: MetocLocationParams) {
+  return loc.siteId ? { siteId: loc.siteId } : { lat: loc.lat, lon: loc.lon };
+}
+export const fetchMetocOutlook = (loc: MetocLocationParams) =>
+  api.get<MetocOutlookResponse>("/metoc/outlook", { params: metocParams(loc) }).then((r) => r.data);
+export const fetchMetocPovTrend = (loc: MetocLocationParams, date: string) =>
+  api.get<MetocPovTrendPoint[]>("/metoc/pov-trend", { params: { ...metocParams(loc), date } }).then((r) => r.data);
+export const fetchMetocFavorability = (loc: MetocLocationParams) =>
+  api.get<MetocMonthFavorability[]>("/metoc/favorability", { params: metocParams(loc) }).then((r) => r.data);
+export const generateMetocMef = (body: {
+  siteId?: string;
+  lat?: number;
+  lon?: number;
+  mode: "range" | "mission";
+  startDate?: string;
+  endDate?: string;
+  missionId?: string;
+}) => api.post<MetocMefResponse>("/metoc/mef/generate", body).then((r) => r.data);
 
 // Users / Admin
 export const fetchUsers = () => api.get<UserRecord[]>("/users").then((r) => r.data);

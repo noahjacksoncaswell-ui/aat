@@ -25,6 +25,7 @@ import lwccRoutes from "./routes/lwcc";
 import personnelRoutes from "./routes/personnel";
 import missionPersonnelRoutes from "./routes/missionPersonnel";
 import missionPollsRoutes from "./routes/missionPolls";
+import metocRoutes from "./routes/metoc";
 
 const app = express();
 app.use(helmet());
@@ -47,6 +48,7 @@ app.use("/api/missions/:missionId/countdown", requireAuth, countdownRoutes);
 app.use("/api/missions/:missionId/lwcc", requireAuth, lwccRoutes);
 app.use("/api/missions/:missionId/personnel", requireAuth, missionPersonnelRoutes);
 app.use("/api/missions/:missionId/polls", requireAuth, missionPollsRoutes);
+app.use("/api/metoc", requireAuth, metocRoutes);
 app.use("/api/personnel", requireAuth, personnelRoutes);
 app.use("/api/coa", requireAuth, coaRoutes);
 app.use("/api/documents", requireAuth, documentRoutes);

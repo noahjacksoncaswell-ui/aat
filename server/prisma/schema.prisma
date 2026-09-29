@@ -282,12 +282,13 @@ model Site {
   createdAt                  DateTime      @default(now())
   updatedAt                  DateTime      @updatedAt
 
-  photos         SitePhoto[]
-  missions       Mission[]
-  coas           COA[]
-  documents      Document[]
-  assignedUsers  UserSiteAssignment[]
-  weatherSamples WeatherSample[]
+  photos            SitePhoto[]
+  missions          Mission[]
+  coas              COA[]
+  documents         Document[]
+  assignedUsers     UserSiteAssignment[]
+  weatherSamples    WeatherSample[]
+  metocPovSnapshots MetocPovSnapshot[]
 
   @@index([status])
 }
@@ -1064,4 +1065,33 @@ model AuditLogEntry {
 
   @@index([targetType, targetId])
   @@index([timestamp])
+}
+
+// ---------------------------------------------------------------------------
+// METOC Outlook (Revision Directive v8.0/v8.1)
+// ---------------------------------------------------------------------------
+
+// v8.1 Section 3.1 - one row per (location, forecastDate) each time the
+// METOC page's Weather Outlook is loaded for that location, snapshotting
+// the PoV figure computed at that moment (Section 6 of v8.0, reused
+// unchanged). This is a stored history of an existing computation, not a
+// new data source - the Trend & Window Analysis subtab reads it back as a
+// log of how a given upcoming date's risk assessment has moved over time.
+// A registered Site is keyed by siteId; manual coordinates are keyed by
+// lat/lon rounded to 3 decimals (~110m) so repeated loads of "the same"
+// manual point collapse into one trend log instead of fragmenting on
+// floating-point noise.
+model MetocPovSnapshot {
+  id              String   @id @default(uuid())
+  siteId          String?
+  site            Site?    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  lat             Float
+  lon             Float
+  forecastDate    DateTime // calendar date (UTC midnight) this PoV figure is FOR
+  snapshotAt      DateTime @default(now()) // when this PoV figure was computed
+  povPercent      Int
+  primaryConcerns String[] // e.g. "Cloud Base Rule [LWCCR 5]"
+
+  @@index([siteId, forecastDate])
+  @@index([lat, lon, forecastDate])
 }

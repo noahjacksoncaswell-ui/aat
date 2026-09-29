@@ -510,6 +510,10 @@ export const LOT_CERTIFICATION_TEXTS: string[] = [
 // the Documentation Library itself).
 export const TRAJECTORY_SIMULATION_REPORT_CATEGORY = "Trajectory Simulation Report";
 
+// v8.0 Section 4.3 - the Unofficial MEF Generator archives to this
+// already-existing category (no new category is introduced).
+export const METOC_MEF_CATEGORY = "Mission Execution Forecast (Weather)";
+
 export const DOCUMENT_CATEGORIES = [
   "Mission Operations Plan (MOP)",
   "Certification of Mission Readiness (CoMR)",
@@ -518,7 +522,7 @@ export const DOCUMENT_CATEGORIES = [
   COA_DOCUMENT_CATEGORY,
   "Vehicle Certification & Test Data",
   "Launch Countdown Procedure",
-  "Mission Execution Forecast (Weather)",
+  METOC_MEF_CATEGORY,
   TRAJECTORY_SIMULATION_REPORT_CATEGORY,
   "Other",
 ];
@@ -642,4 +646,120 @@ export interface PollAuditEntry {
   isOverride: boolean;
   actorName: string;
   timestamp: string;
+}
+
+// ---------------------------------------------------------------------------
+// v8.0/v8.1 - METOC Outlook
+// ---------------------------------------------------------------------------
+
+export interface MetocLocationInfo {
+  lat: number;
+  lon: number;
+  siteId: string | null;
+  siteName: string | null;
+  city: string | null;
+  county: string | null;
+  state: string | null;
+}
+
+export interface MetocHourlyPoint {
+  startTime: string;
+  temperatureF?: number;
+  windSpeedText?: string;
+  windDirectionDeg?: string;
+  precipitationProbabilityPct?: number;
+  shortForecast?: string;
+}
+
+export interface MetocDayPov {
+  date: string;
+  povPercent: number;
+  primaryConcerns: string[];
+}
+
+export interface MetocDailyEntry {
+  date: string;
+  label: string;
+  tempHighF?: number;
+  tempLowF?: number;
+  windSpeedText?: string;
+  windDirectionDeg?: string;
+  precipitationProbabilityPct?: number;
+  shortForecast?: string;
+  detailedForecast?: string;
+  pov: MetocDayPov;
+}
+
+export interface MetocClimateOutlookCategory {
+  variable: "Temperature" | "Precipitation";
+  category: string;
+  probabilityPct?: number;
+  periodLabel?: string;
+  source: string;
+}
+
+export interface MetocMonthlyNormal {
+  month: number;
+  monthName: string;
+  avgHighF?: number;
+  avgLowF?: number;
+  avgPrecipIn?: number;
+  stationId?: string;
+  stationName?: string;
+}
+
+export interface MetocMonthFavorability {
+  month: number;
+  monthName: string;
+  favorabilityPct: number;
+  avgHighF?: number;
+  avgLowF?: number;
+  avgPrecipIn?: number;
+}
+
+export type MetocTier<T> = { status: "OK"; data: T } | { status: "UNAVAILABLE"; error: string };
+
+export interface MetocOutlookResponse {
+  location: MetocLocationInfo;
+  tierA: MetocTier<MetocHourlyPoint[]>;
+  tierB: MetocTier<MetocDailyEntry[]>;
+  tierC: MetocTier<MetocClimateOutlookCategory[]>;
+  tierD: MetocTier<MetocMonthlyNormal[]>;
+  favorability: MetocMonthFavorability[] | null;
+}
+
+export interface MetocPovTrendPoint {
+  snapshotAt: string;
+  povPercent: number;
+  primaryConcerns: string[];
+}
+
+export interface MetocMefDay {
+  date: string;
+  label: string;
+  tempHighF?: number;
+  tempLowF?: number;
+  tempAvgF?: number;
+  dewpointF?: number;
+  humidityPct?: number;
+  shortForecast?: string;
+  windSpeedText?: string;
+  windDirectionDeg?: string;
+  precipitationProbabilityPct?: number;
+  coverage: string;
+  povPercent: number;
+  primaryConcerns: string[];
+}
+
+export interface MetocMefResponse {
+  header: {
+    mission: string;
+    issuedAt: string;
+    valid: string[];
+    duration: string;
+    site: string;
+    station: string;
+  };
+  forecastDiscussion: string;
+  days: MetocMefDay[];
 }
