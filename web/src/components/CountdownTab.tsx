@@ -295,6 +295,12 @@ function ActionCard({
     orange: "border-aat-caution",
     gray: "border-zinc-700",
   }[border];
+  // v9.7 Section 4 - every card reserves the same fixed caption-line space
+  // beneath its content, always rendered (never conditionally added), so
+  // every button box shares identical height regardless of state: the
+  // actual reason when disabled, "AVAIL — NO ERR" when not. v9.7 Section 1 -
+  // caption text must always fit one line at this card's width; abbreviate
+  // rather than let it wrap.
   return (
     <div
       className={`flex flex-col justify-center gap-1.5 border-2 p-2.5 ${borderClass} ${wide ? "w-full sm:w-auto" : ACTION_CARD_WIDTH} ${
@@ -302,7 +308,9 @@ function ActionCard({
       }`}
     >
       {children}
-      {disabled && overlayText && <div className="text-[9px] font-semibold uppercase leading-tight tracking-wide text-slate-400">{overlayText}</div>}
+      <div className="truncate whitespace-nowrap text-[9px] font-semibold uppercase leading-tight tracking-wide text-slate-400">
+        {disabled && overlayText ? overlayText : "AVAIL — NO ERR"}
+      </div>
     </div>
   );
 }
@@ -510,7 +518,7 @@ function HoldManagement({
   const revokeDisabled = !armed;
 
   let xmitOverlay: string | undefined;
-  if (!armed) xmitOverlay = "N/A — TERMINAL COUNT NOT ARMED";
+  if (!armed) xmitOverlay = "N/A — T-COUNT NOT ARMED";
   else if (xmitted) xmitOverlay = "N/A — ALREADY TRANSMITTED";
   const xmitDisabled = !!xmitOverlay;
 
@@ -523,14 +531,15 @@ function HoldManagement({
   const selNewLotOverlay = !state.lot ? "N/A — NO LOT ESTABLISHED" : undefined;
   const selNewLotDisabled = !!selNewLotOverlay;
 
-  const recToMarkOverlay = state.tCountStatus !== "COUNTING" ? "N/A — NO MARK AVAILABLE TO RECYCLE TO" : undefined;
+  const recToMarkOverlay = state.tCountStatus !== "COUNTING" ? "N/A — NO MARK TO RECYCLE" : undefined;
   const recToMarkDisabled = !!recToMarkOverlay;
 
   const targetedEntry = mission.launchPeriodEntries.find((e) => e.isTargeted);
+  // v9.7 Section 1 - abbreviated to fit one line at the card's standard
+  // width (was wrapping to three lines and inflating the button's box).
   let abortOverlay: string | undefined;
-  if (mission.status !== "TARGETED" || !targetedEntry) abortOverlay = "SCRUB UNAVAILABLE — NO TARGET LAUNCH OPPORTUNITY CONFIRMED";
-  else if (!isSameUtcDateClient(new Date(targetedEntry.date), new Date()))
-    abortOverlay = "SCRUB UNAVAILABLE — NO TARGET LAUNCH OPPORTUNITY CONFIRMED FOR TODAY";
+  if (mission.status !== "TARGETED" || !targetedEntry) abortOverlay = "SCRUB U/A — NO TLO";
+  else if (!isSameUtcDateClient(new Date(targetedEntry.date), new Date())) abortOverlay = "SCRUB U/A — NO TLO TDY";
   const abortDisabled = !!abortOverlay;
 
   // --- Part 3 (Routine Hold Actions) derived state ---
@@ -843,7 +852,7 @@ function HoldManagement({
           </div>
 
           {/* Terminal Count Arm (v9.3 Section 3.3.3, new logic; v9.5 Section 1 - no "Part N" numbering) */}
-          <div className="mb-8 border-t border-slate-800/70 pt-5">
+          <div className="mb-8">
             <div className={sectionTitleClass}>Terminal Count Arm</div>
             <div className={actionRowClass}>
               <ActionCard border="white" disabled={armDisabled} overlayText={armOverlay}>
@@ -877,10 +886,14 @@ function HoldManagement({
               own row; T-mark/Duration/Reason/ADD PGM HOLD in one single
               bordered group, one overlay, arranged horizontally - matching
               the pattern the LWCC/PEMSG Rec Hold Actions groups already
-              use, rather than a separate card per field/button.) */}
-          <div className="mb-8 border-t border-slate-800/70 pt-5">
+              use, rather than a separate card per field/button. v9.7
+              Section 3 - the field group now sits to the right of CALL
+              HOLD on the same row, same side-by-side pattern as the
+              LWCC/PEMSG indefinite+duration pairs below, rather than on
+              its own row beneath.) */}
+          <div className="mb-8">
             <div className={sectionTitleClass}>Routine Hold Actions</div>
-            <div className="space-y-2">
+            <div className={actionRowClass}>
               {/* v9.5 Section 4 - CALL HOLD is one of the three indefinite
                   hold buttons: orange (was red). v9.6 Section 3.1.1 - single
                   standard-width button, left-aligned, own row, remainder
@@ -941,7 +954,7 @@ function HoldManagement({
               Section 3 - DUR variant's field+button now horizontal, same
               height/width as the INDEF card beside it; Section 4 - INDEF is
               orange, DUR group is gray) */}
-          <div className="mb-8 border-t border-slate-800/70 pt-5">
+          <div className="mb-8">
             <div className={sectionTitleClass}>LWCC Rec Hold Actions</div>
             <div className={actionRowClass}>
               <ActionCard border="orange" disabled={lwccRecDisabled} overlayText={lwccRecOverlay}>
@@ -989,7 +1002,7 @@ function HoldManagement({
           {/* PEMSG Rec Hold Actions (v9.5 Section 1 - no "Part N" numbering;
               Section 3 - DUR variant horizontal; Section 4 - INDEF orange,
               DUR group gray) */}
-          <div className="border-t border-slate-800/70 pt-5">
+          <div>
             <div className={sectionTitleClass}>PEMSG Rec Hold Actions</div>
             <div className={actionRowClass}>
               <ActionCard border="orange" disabled={pemsgRecDisabled} overlayText={pemsgRecOverlay}>
