@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { HoldType, MissionHistoryEventType, MissionStatus } from "@prisma/client";
+import { HoldType, MissionHistoryEventType, MissionStatus, CommsRecipient, MissionRole } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { requireLaunchDirector, requireRole } from "../middleware/auth";
 import { Role } from "@prisma/client";
@@ -289,7 +289,27 @@ router.patch("/lot", requireLaunchDirector, async (req, res) => {
 // Hold management (Section 6.2.3)
 // ---------------------------------------------------------------------------
 
-const programmedHoldSchema = z.object({ holdMarkSeconds: z.number(), estimatedDurationSeconds: z.number(), reason: z.string().optional() });
+// v9.6 Section 1.2 - marks the REC HOLD message that a real hold was just
+// created from as ACTIONED, so Part 5 correctly re-locks afterward. Best-
+// effort by design: matched only on (mission, REC HOLD, PENDING/APPROVED),
+// so a stale/already-resolved id (a race with another actor) simply no-ops
+// rather than failing the hold creation that matters operationally.
+async function markPemsgMessageActioned(tx: any, mId: string, pemsgMessageId: string, actorId: string) {
+  await tx.formalCommsMessage.updateMany({
+    where: { id: pemsgMessageId, missionId: mId, actionCode: "REC HOLD", lifecycleState: { in: ["PENDING", "APPROVED"] } },
+    data: { lifecycleState: "ACTIONED", resolvedAt: new Date(), resolvedById: actorId, resolutionCode: "ACTIONED" },
+  });
+}
+
+const programmedHoldSchema = z.object({
+  holdMarkSeconds: z.number(),
+  estimatedDurationSeconds: z.number(),
+  reason: z.string().optional(),
+  // v9.6 Section 1.2 - present only when this programmed hold (WX HOLD -
+  // DUR / PEMSG HOLD - DUR) is being created to act on an outstanding
+  // REC HOLD recommendation.
+  pemsgMessageId: z.string().optional(),
+});
 
 router.post("/holds", requireLaunchDirector, async (req, res) => {
   const parsed = programmedHoldSchema.safeParse(req.body);
@@ -305,15 +325,19 @@ router.post("/holds", requireLaunchDirector, async (req, res) => {
     return res.status(400).json({ error: "Hold mark has already been reached by the Test Clock" });
   }
 
-  const hold = await prisma.missionHold.create({
-    data: {
-      missionId: mission.id,
-      type: HoldType.PROGRAMMED,
-      holdMarkSeconds: parsed.data.holdMarkSeconds,
-      estimatedDurationSeconds: parsed.data.estimatedDurationSeconds,
-      reason: parsed.data.reason,
-      enteredById: req.user!.id,
-    },
+  const hold = await prisma.$transaction(async (tx) => {
+    const h = await tx.missionHold.create({
+      data: {
+        missionId: mission.id,
+        type: HoldType.PROGRAMMED,
+        holdMarkSeconds: parsed.data.holdMarkSeconds,
+        estimatedDurationSeconds: parsed.data.estimatedDurationSeconds,
+        reason: parsed.data.reason,
+        enteredById: req.user!.id,
+      },
+    });
+    if (parsed.data.pemsgMessageId) await markPemsgMessageActioned(tx, mission.id, parsed.data.pemsgMessageId, req.user!.id);
+    return h;
   });
   broadcastMissionUpdate(mission.id);
   res.status(201).json(hold);
@@ -364,7 +388,7 @@ type CallHoldResult =
   | { ok: true; hold: Awaited<ReturnType<typeof prisma.missionHold.create>> }
   | { ok: false; status: 400 | 404; message: string };
 
-async function callHold(mId: string, userId: string, reason: string): Promise<CallHoldResult> {
+async function callHold(mId: string, userId: string, reason: string, pemsgMessageId?: string): Promise<CallHoldResult> {
   const mission = await loadMissionWithHolds(mId);
   if (!mission) return { ok: false, status: 404, message: "Mission not found" };
   if (!mission.lot) return { ok: false, status: 400, message: "Test Clock is not established" };
@@ -389,6 +413,7 @@ async function callHold(mId: string, userId: string, reason: string): Promise<Ca
     await tx.missionHistoryEvent.create({
       data: { missionId: mId, eventType: MissionHistoryEventType.HOLD_CALLED, actorId: userId, notes: reason, metadata: { holdId: h.id, unscheduled: true } },
     });
+    if (pemsgMessageId) await markPemsgMessageActioned(tx, mId, pemsgMessageId, userId);
     return h;
   });
 
@@ -399,12 +424,50 @@ async function callHold(mId: string, userId: string, reason: string): Promise<Ca
 
 // CALL HOLD - unscheduled, immediate
 router.post("/holds/call", requireLaunchDirector, async (req, res) => {
-  const parsed = z.object({ reason: z.string().min(1) }).safeParse(req.body);
+  const parsed = z.object({ reason: z.string().min(1), pemsgMessageId: z.string().optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "A reason is required to call a hold" });
 
-  const result = await callHold(missionId(req), req.user!.id, parsed.data.reason);
+  const result = await callHold(missionId(req), req.user!.id, parsed.data.reason, parsed.data.pemsgMessageId);
   if (!result.ok) return res.status(result.status).json({ error: result.message });
   res.status(201).json(result.hold);
+});
+
+// v9.6 Section 2 - WAIVE: a quick, CCS-local equivalent to sending
+// HOLD DENY via the formal comms composer, letting the Launch Director
+// dismiss an outstanding REC HOLD recommendation they don't intend to act
+// on without leaving the CCS tab. This is not a silent dismissal - it
+// creates a second FormalCommsMessage (actionCode WAIVE) alongside
+// marking the original WAIVED, so the decision flows into the Unified Log
+// with the same weight/visibility a real HOLD DENY would carry (Section
+// 3.2/4.4.3 of v9.0), not a bare DB flag flip nobody else can see.
+router.post("/pemsg/:messageId/waive", requireLaunchDirector, async (req, res) => {
+  const mId = missionId(req);
+  const original = await prisma.formalCommsMessage.findUnique({ where: { id: req.params.messageId } });
+  if (!original || original.missionId !== mId) return res.status(404).json({ error: "Message not found" });
+  if (original.actionCode !== "REC HOLD") return res.status(400).json({ error: "WAIVE only applies to REC HOLD recommendations" });
+  if (!original.lifecycleState || !["PENDING", "APPROVED"].includes(original.lifecycleState)) {
+    return res.status(400).json({ error: "This recommendation has already been resolved" });
+  }
+
+  await prisma.$transaction([
+    prisma.formalCommsMessage.update({
+      where: { id: original.id },
+      data: { lifecycleState: "WAIVED", resolvedAt: new Date(), resolvedById: req.user!.id, resolutionCode: "WAIVE" },
+    }),
+    prisma.formalCommsMessage.create({
+      data: {
+        missionId: mId,
+        senderId: req.user!.id,
+        senderRole: MissionRole.LD,
+        recipient: CommsRecipient.GENERAL,
+        actionCode: "WAIVE",
+        detail: `Waived REC HOLD from ${original.senderRole} without action (CCS quick-dismiss)`,
+      },
+    }),
+  ]);
+
+  broadcastMissionUpdate(mId);
+  res.status(204).send();
 });
 
 // PROCEED THROUGH HOLD

@@ -433,6 +433,15 @@ router.post("/:id/actions/scrub", requireLaunchDirector, async (req, res) => {
         metadata: { remainingOpportunities: remaining.length },
       },
     });
+    // v9.6 Section 1.2 - a real Scrub is REC TERM's own ACTIONED event
+    // (this directive's Part 5 equivalent for terminate recommendations -
+    // there is no dedicated button for it, per the v9.3 Section 4.4.4
+    // scope boundary: approving a terminate recommendation never itself
+    // executes anything; ABORT/RTS is what finally acts on it).
+    await tx.formalCommsMessage.updateMany({
+      where: { missionId: mission.id, actionCode: "REC TERM", lifecycleState: { in: ["PENDING", "APPROVED"] } },
+      data: { lifecycleState: "ACTIONED", resolvedAt: new Date(), resolvedById: req.user!.id, resolutionCode: "ACTIONED" },
+    });
   });
 
   await recordAudit({ userId: req.user!.id, action: "MISSION_SCRUBBED", targetType: "Mission", targetId: mission.id, metadata: { ...parsed.data, remainingOpportunities: remaining.length } });

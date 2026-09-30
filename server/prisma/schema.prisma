@@ -84,6 +84,20 @@ enum CofrBasis {
   WILL_FILE_WITHIN_24H
 }
 
+// v9.6 Section 1.2 - explicit lifecycle for a REC HOLD/REC TERM message,
+// replacing the old single resolved/not-resolved boolean (whose collapse
+// of APPROVED into "resolved" was the v9.6 Section 1.1 defect: approving a
+// recommendation immediately re-greyed the very buttons needed to act on
+// it). Only ever set on FormalCommsMessage rows whose actionCode is
+// REC HOLD or REC TERM; null on every other action type.
+enum PemsgLifecycleState {
+  PENDING // sent, no LD response yet
+  APPROVED // LD sent HOLD APPR/TERM APPR - not yet acted on
+  ACTIONED // a real hold (REC HOLD) or real Scrub (REC TERM) was executed from it
+  DENIED // LD sent HOLD DENY/TERM DENY
+  WAIVED // REC HOLD only - dismissed via the CCS-local WAIVE control (Section 2)
+}
+
 enum MilestoneStatus {
   UPCOMING
   IN_PROGRESS
@@ -1072,12 +1086,18 @@ model FormalCommsMessage {
   resolvedAt     DateTime?
   resolvedById   String?
   resolvedBy     User?     @relation("CommsResolvedBy", fields: [resolvedById], references: [id])
-  resolutionCode String? // the HOLD APPR/HOLD DENY/TERM APPR/TERM DENY that resolved this
+  resolutionCode String? // the HOLD DENY/TERM DENY/ACTIONED/WAIVE that terminally resolved this
+
+  // v9.6 Section 1.2 - PENDING -> APPROVED is not a resolution (the banner
+  // and Part 5/REC TERM actions stay available through APPROVED); only
+  // ACTIONED/DENIED/WAIVED are terminal, and only those set resolvedAt.
+  lifecycleState PemsgLifecycleState?
 
   timestamp DateTime @default(now())
 
   @@index([missionId])
   @@index([missionId, actionCode, resolvedAt])
+  @@index([missionId, actionCode, lifecycleState])
 }
 
 // ---------------------------------------------------------------------------

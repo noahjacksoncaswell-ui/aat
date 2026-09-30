@@ -33,6 +33,7 @@ function serialize(m: any) {
     resolvedById: m.resolvedById,
     resolvedByName: m.resolvedBy?.name ?? null,
     resolutionCode: m.resolutionCode,
+    lifecycleState: m.lifecycleState,
     timestamp: m.timestamp,
     line: formatCommsLine({ timestamp: m.timestamp, senderRole: m.senderRole, recipient: m.recipient, actionCode: m.actionCode, fields: m.fields, detail: m.detail }),
   };
@@ -123,22 +124,37 @@ router.post("/", async (req, res) => {
       actionCode,
       fields: f as any,
       detail: detail ?? null,
+      // v9.6 Section 1.2 - REC HOLD/REC TERM rows start their explicit
+      // lifecycle here; every other action code leaves this null.
+      ...(actionCode === "REC HOLD" || actionCode === "REC TERM" ? { lifecycleState: "PENDING" } : {}),
     },
     include: INCLUDE,
   });
 
-  // v9.0 Section 5.4 resolution linkage - interpretive choice documented in
-  // schema.prisma/FormalCommsMessage: since the composer has no per-message
-  // reply mechanism, an LD HOLD APPR/HOLD DENY resolves every currently-
-  // outstanding REC HOLD message; TERM APPR/DENY likewise for REC TERM.
-  // This ONLY marks FormalCommsMessage rows resolved - it does not touch
-  // MissionHold or any other table (Section 4.4.4 boundary).
+  // v9.6 Section 1 [BUG FIX] - the old single resolved/not-resolved model
+  // (v9.0 Section 5.4) made HOLD APPR/TERM APPR itself clear the
+  // recommendation, which re-greyed Part 5/ABORT-RTS before the Launch
+  // Director could act on their own approval. Approval now only advances
+  // PENDING -> APPROVED - NOT a resolution, so resolvedAt stays unset and
+  // the CCS banner keeps showing it. Only DENY is a terminal resolution
+  // here; ACTIONED (real hold/Scrub executed) and WAIVED are set
+  // elsewhere (countdown.ts / missions.ts scrub / the WAIVE route), never
+  // by this compose endpoint. This still ONLY writes FormalCommsMessage
+  // rows - no MissionHold or other table write (Section 4.4.4 boundary).
   if (senderRole === MissionRole.LD && ["HOLD APPR", "HOLD DENY", "TERM APPR", "TERM DENY"].includes(actionCode)) {
     const targetActionCode = actionCode.startsWith("HOLD") ? "REC HOLD" : "REC TERM";
-    await prisma.formalCommsMessage.updateMany({
-      where: { missionId: mId, actionCode: targetActionCode, resolvedAt: null },
-      data: { resolvedAt: new Date(), resolvedById: req.user!.id, resolutionCode: actionCode },
-    });
+    const isApproval = actionCode.endsWith("APPR");
+    if (isApproval) {
+      await prisma.formalCommsMessage.updateMany({
+        where: { missionId: mId, actionCode: targetActionCode, lifecycleState: "PENDING" },
+        data: { lifecycleState: "APPROVED" },
+      });
+    } else {
+      await prisma.formalCommsMessage.updateMany({
+        where: { missionId: mId, actionCode: targetActionCode, lifecycleState: { in: ["PENDING", "APPROVED"] } },
+        data: { lifecycleState: "DENIED", resolvedAt: new Date(), resolvedById: req.user!.id, resolutionCode: actionCode },
+      });
+    }
   }
 
   broadcastMissionUpdate(mId);

@@ -112,11 +112,16 @@ export const submitLot = (missionId: string, data: Record<string, unknown>) =>
   api.post(`/missions/${missionId}/countdown/lot`, data);
 export const reviseLot = (missionId: string, lot: string, reason: string) =>
   api.patch(`/missions/${missionId}/countdown/lot`, { lot, reason });
-export const addProgrammedHold = (missionId: string, data: { holdMarkSeconds: number; estimatedDurationSeconds: number; reason?: string }) =>
-  api.post(`/missions/${missionId}/countdown/holds`, data).then((r) => r.data);
+export const addProgrammedHold = (
+  missionId: string,
+  data: { holdMarkSeconds: number; estimatedDurationSeconds: number; reason?: string; pemsgMessageId?: string }
+) => api.post(`/missions/${missionId}/countdown/holds`, data).then((r) => r.data);
 export const removeHold = (missionId: string, holdId: string) => api.delete(`/missions/${missionId}/countdown/holds/${holdId}`);
-export const callHold = (missionId: string, reason: string) =>
-  api.post(`/missions/${missionId}/countdown/holds/call`, { reason }).then((r) => r.data);
+export const callHold = (missionId: string, reason: string, pemsgMessageId?: string) =>
+  api.post(`/missions/${missionId}/countdown/holds/call`, { reason, pemsgMessageId }).then((r) => r.data);
+// v9.6 Section 2 - WAIVE
+export const waivePemsgHold = (missionId: string, messageId: string) =>
+  api.post(`/missions/${missionId}/countdown/pemsg/${messageId}/waive`);
 export const releaseHold = (missionId: string, holdId: string) =>
   api.post(`/missions/${missionId}/countdown/holds/${holdId}/release`);
 export const setHoldAutoProceed = (missionId: string, holdId: string, autoProceed: boolean) =>

@@ -921,6 +921,8 @@ export interface FormalCommsMessage {
   resolvedById: string | null;
   resolvedByName: string | null;
   resolutionCode: string | null;
+  // v9.6 Section 1.2 - only set on REC HOLD/REC TERM rows; null otherwise.
+  lifecycleState: "PENDING" | "APPROVED" | "ACTIONED" | "DENIED" | "WAIVED" | null;
   timestamp: string;
   line: string;
 }

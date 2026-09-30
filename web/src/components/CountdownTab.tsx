@@ -25,6 +25,7 @@ import {
   submitLot,
   updateMilestone,
   uploadDocument,
+  waivePemsgHold,
   xmitCcsToVfs,
 } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
@@ -254,25 +255,38 @@ function CofrComplianceGateAlert({ mission, hold }: { mission: Mission; hold: Mi
 }
 
 // v9.5 Section 4 - restrained color scheme, fully replacing v9.3 Section
-// 3.3.1's broader 4-tier scheme. Color now marks only seven buttons in the
+// 3.3.1's broader 4-tier scheme. Color now marks only these buttons in the
 // whole console: red = ABORT/RTS only; orange = the three indefinite-hold
 // buttons (CALL HOLD, WX HOLD - INDEF, PEMSG HOLD - INDEF); white = ARM
 // TERMINAL COUNT, MARK LIFTOFF, XMIT CCS TO VFS. Every other button/field
-// group - SEL NEW LOT, REC TO MARK, REVOKE ARM, the ADD PGM HOLD group, and
-// both DUR-variant groups - is plain gray.
-// Every card is always rendered (the directive's governing principle: a
-// control is never simply absent) - when `disabled`, the control(s) inside
-// stay in the DOM (disabled, not removed) beneath an overlay stating why,
-// and the overlay itself sits on top to prevent any stray click through it.
+// group - SEL NEW LOT, REC TO MARK, REVOKE ARM, the ADD PGM HOLD group,
+// both DUR-variant groups, and WAIVE (v9.6 Section 2) - is plain gray.
+//
+// v9.6 Section 3.1.1 - one standard card width, applied everywhere a
+// single button lives; `wide` opts a field-group card (programmed hold,
+// DUR variants) out of that width so it instead sizes to its own content
+// rather than stretching full-row. Cards are laid out by the caller in a
+// left-justified flex row with a fixed gap (never CSS Grid stretch, never
+// space-between/space-around) so rows of different cell counts end at
+// different widths instead of all filling the row.
+//
+// v9.6 Section 3.3 - the unavailable state no longer replaces the card's
+// content with a wall-of-text overlay. The control stays visible (dimmed),
+// and overlayText renders as a small secondary caption beneath it - the
+// control's own identity stays primary, the reason becomes supporting info.
+const ACTION_CARD_WIDTH = "w-full sm:w-56";
+
 function ActionCard({
   border,
   disabled,
   overlayText,
+  wide,
   children,
 }: {
   border: "white" | "red" | "orange" | "gray";
   disabled: boolean;
   overlayText?: string;
+  wide?: boolean;
   children: React.ReactNode;
 }) {
   const borderClass = {
@@ -282,16 +296,24 @@ function ActionCard({
     gray: "border-zinc-700",
   }[border];
   return (
-    <div className={`relative flex flex-col justify-center gap-2 border-2 p-3 ${borderClass} ${disabled ? "opacity-60" : ""}`}>
+    <div
+      className={`flex flex-col justify-center gap-1.5 border-2 p-2.5 ${borderClass} ${wide ? "w-full sm:w-auto" : ACTION_CARD_WIDTH} ${
+        disabled ? "opacity-60" : ""
+      }`}
+    >
       {children}
-      {disabled && overlayText && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/85 p-2 text-center text-[10px] font-bold uppercase tracking-wide text-slate-200">
-          {overlayText}
-        </div>
-      )}
+      {disabled && overlayText && <div className="text-[9px] font-semibold uppercase leading-tight tracking-wide text-slate-400">{overlayText}</div>}
     </div>
   );
 }
+
+// v9.6 Section 3.1 - left-justified flex row, fixed gap, no stretch (the
+// grid it replaces stretched every card to its column width and forced
+// uniform row height). Section 3.2 - section titles get a thin accent
+// underline, brighter tone, and wider letter-spacing so a section boundary
+// registers before reading individual buttons.
+const actionRowClass = "flex flex-wrap items-start gap-3";
+const sectionTitleClass = "mb-2 border-b border-aat-accent/30 pb-1 text-[11px] font-bold uppercase tracking-[0.15em] text-slate-300";
 
 // v9.3 - CCS Hold Management full restructure. Replaces the prior single
 // Hold Management box with three sibling-level boxes (Section 3): Box One
@@ -334,7 +356,7 @@ function HoldManagement({
   // INDEF pre-populate and lock the reason (v9.3 Part 4/5 - "not a
   // lighter-weight variant," the same confirmation gate as CALL HOLD, just
   // with no manual reason entry required).
-  const [holdConfirm, setHoldConfirm] = useState<{ label: string; reason: string; editable: boolean } | null>(null);
+  const [holdConfirm, setHoldConfirm] = useState<{ label: string; reason: string; editable: boolean; pemsgMessageId?: string } | null>(null);
 
   // Part 4 - LWCC Rec Hold Actions.
   const [weatherHoldDuration, setWeatherHoldDuration] = useState("00:15:00");
@@ -349,8 +371,16 @@ function HoldManagement({
     queryFn: () => fetchMissionComms(mission.id),
     refetchInterval: 10_000,
   });
-  const outstandingPemsg = (commsMessages ?? []).filter((m) => (m.actionCode === "REC HOLD" || m.actionCode === "REC TERM") && !m.resolvedAt);
-  const outstandingPemsgHold = (commsMessages ?? []).filter((m) => m.actionCode === "REC HOLD" && !m.resolvedAt);
+  // v9.6 Section 1.2 [BUG FIX] - "outstanding" now means PENDING or
+  // APPROVED, not merely "not yet resolved". The old !resolvedAt check
+  // conflated APPROVED with a terminal resolution: the instant the LD sent
+  // HOLD APPR, the message stopped being "outstanding" and Part 5's
+  // buttons re-greyed before the LD could act on their own approval. Only
+  // ACTIONED/DENIED/WAIVED are terminal now.
+  const pemsgOutstanding = (m: { actionCode: string; lifecycleState: string | null }) =>
+    m.lifecycleState === "PENDING" || m.lifecycleState === "APPROVED";
+  const outstandingPemsg = (commsMessages ?? []).filter((m) => (m.actionCode === "REC HOLD" || m.actionCode === "REC TERM") && pemsgOutstanding(m));
+  const outstandingPemsgHold = (commsMessages ?? []).filter((m) => m.actionCode === "REC HOLD" && pemsgOutstanding(m));
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["countdown", mission.id] });
@@ -358,7 +388,8 @@ function HoldManagement({
   };
 
   const addHold = useMutation({
-    mutationFn: (data: { holdMarkSeconds: number; estimatedDurationSeconds: number; reason: string }) => addProgrammedHold(mission.id, data),
+    mutationFn: (data: { holdMarkSeconds: number; estimatedDurationSeconds: number; reason: string; pemsgMessageId?: string }) =>
+      addProgrammedHold(mission.id, data),
     onSuccess: () => {
       invalidate();
       setNewHold({ holdMark: "00:30:00", duration: "00:15:00", reason: "" });
@@ -367,11 +398,19 @@ function HoldManagement({
   const removeHoldMutation = useMutation({ mutationFn: (id: string) => removeHold(mission.id, id), onSuccess: invalidate });
   const releaseHoldMutation = useMutation({ mutationFn: (id: string) => releaseHold(mission.id, id), onSuccess: invalidate });
   const callHoldMutation = useMutation({
-    mutationFn: (reason: string) => callHold(mission.id, reason),
+    mutationFn: ({ reason, pemsgMessageId }: { reason: string; pemsgMessageId?: string }) => callHold(mission.id, reason, pemsgMessageId),
     onSuccess: () => {
       invalidate();
       setHoldConfirm(null);
     },
+  });
+  // v9.6 Section 2 - WAIVE is the CCS-local quick equivalent of sending
+  // HOLD DENY: marks the originating REC HOLD/REC TERM message WAIVED
+  // (logged with the same weight as HOLD DENY, not a silent dismissal),
+  // clears the Box Two banner, and re-locks Part 5.
+  const waiveMutation = useMutation({
+    mutationFn: (messageId: string) => waivePemsgHold(mission.id, messageId),
+    onSuccess: invalidate,
   });
   const autoProceedMutation = useMutation({
     mutationFn: ({ holdId, autoProceed }: { holdId: string; autoProceed: boolean }) => setHoldAutoProceed(mission.id, holdId, autoProceed),
@@ -431,10 +470,14 @@ function HoldManagement({
   }
 
   const weatherHoldReason = `Weather — LWCCR ${violatingRows.map((r) => r.no).join(", ")} violated`;
-  const pemsgHoldReason =
-    outstandingPemsgHold.length > 0
-      ? `PEMSG REC HOLD — ${outstandingPemsgHold[0].senderRole} — ${outstandingPemsgHold[0].detail ?? outstandingPemsgHold[0].line}`
-      : "";
+  // v9.6 Section 1.2 - the specific message these Part 5 actions resolve;
+  // its id is threaded through to the hold-creation calls so the backend
+  // marks the correct originating message ACTIONED (not a mass-resolve of
+  // every outstanding REC HOLD).
+  const targetPemsgHold = outstandingPemsgHold[0];
+  const pemsgHoldReason = targetPemsgHold
+    ? `PEMSG REC HOLD — ${targetPemsgHold.senderRole} — ${targetPemsgHold.detail ?? targetPemsgHold.line}`
+    : "";
 
   // v9.5 Section 5 - LSC State panel data. Same query key the Polls tab and
   // Range Ops Display use (LaunchStatusCheckBoard), so this never computes
@@ -509,12 +552,6 @@ function HoldManagement({
   else if (activeHold) pemsgRecOverlay = "N/A — HOLD ALREADY ACTIVE";
   else if (state.tCountStatus !== "COUNTING") pemsgRecOverlay = "N/A — T-COUNT NOT ACTIVE";
   const pemsgRecDisabled = !!pemsgRecOverlay;
-
-  const gridClass = "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4";
-  // v9.5 Section 3 - the LWCC/PEMSG Rec Hold Actions groups are exactly two
-  // cards each (INDEF + DUR); a 2-up grid keeps both cards the same width,
-  // rather than the 4-up grid stretching to leave two columns unused.
-  const gridClass2 = "grid grid-cols-1 gap-3 sm:grid-cols-2";
 
   return (
     <>
@@ -696,8 +733,21 @@ function HoldManagement({
           {outstandingPemsg.length > 0 ? (
             <ul className="space-y-1.5">
               {outstandingPemsg.map((m) => (
-                <li key={m.id} className="border border-aat-caution bg-aat-caution/10 px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-200">
-                  PEMSG {m.line}
+                <li
+                  key={m.id}
+                  className="flex items-center justify-between gap-2 border border-aat-caution bg-aat-caution/10 px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-200"
+                >
+                  <span>PEMSG {m.line}</span>
+                  {/* v9.6 Section 1.2 - banner must indicate which of
+                      PENDING/APPROVED the message is currently in; it no
+                      longer clears at APPROVED, only at ACTIONED/DENIED/WAIVED. */}
+                  <span
+                    className={`shrink-0 text-[10px] font-bold uppercase tracking-wide ${
+                      m.lifecycleState === "APPROVED" ? "text-aat-go" : "text-aat-caution"
+                    }`}
+                  >
+                    {m.lifecycleState}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -757,9 +807,9 @@ function HoldManagement({
           </div>
 
           {/* Time Control Actions (v9.5 Section 1 - no "Part N" numbering) */}
-          <div className="mb-5">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Time Control Actions</div>
-            <div className={gridClass}>
+          <div className="mb-8">
+            <div className={sectionTitleClass}>Time Control Actions</div>
+            <div className={actionRowClass}>
               <ActionCard border="white" disabled={liftoffDisabled} overlayText={liftoffOverlay}>
                 <button
                   onClick={() => {
@@ -793,9 +843,9 @@ function HoldManagement({
           </div>
 
           {/* Terminal Count Arm (v9.3 Section 3.3.3, new logic; v9.5 Section 1 - no "Part N" numbering) */}
-          <div className="mb-5">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Terminal Count Arm</div>
-            <div className={gridClass}>
+          <div className="mb-8 border-t border-slate-800/70 pt-5">
+            <div className={sectionTitleClass}>Terminal Count Arm</div>
+            <div className={actionRowClass}>
               <ActionCard border="white" disabled={armDisabled} overlayText={armOverlay}>
                 <button onClick={() => armMutation.mutate()} disabled={armDisabled} className="btn-primary w-full text-xs disabled:opacity-50">
                   Arm Terminal Count
@@ -828,11 +878,13 @@ function HoldManagement({
               bordered group, one overlay, arranged horizontally - matching
               the pattern the LWCC/PEMSG Rec Hold Actions groups already
               use, rather than a separate card per field/button.) */}
-          <div className="mb-5">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Routine Hold Actions</div>
-            <div className="space-y-3">
+          <div className="mb-8 border-t border-slate-800/70 pt-5">
+            <div className={sectionTitleClass}>Routine Hold Actions</div>
+            <div className="space-y-2">
               {/* v9.5 Section 4 - CALL HOLD is one of the three indefinite
-                  hold buttons: orange (was red). */}
+                  hold buttons: orange (was red). v9.6 Section 3.1.1 - single
+                  standard-width button, left-aligned, own row, remainder
+                  empty (ActionCard's default width, not `wide`). */}
               <ActionCard border="orange" disabled={routineHoldDisabled} overlayText={routineHoldOverlay}>
                 <button
                   onClick={() => setHoldConfirm({ label: "Call Hold", reason: "", editable: true })}
@@ -842,27 +894,29 @@ function HoldManagement({
                   Call Hold
                 </button>
               </ActionCard>
-              <ActionCard border="gray" disabled={routineHoldDisabled} overlayText={routineHoldOverlay}>
+              {/* v9.6 Section 3.1.1 - field group sized to the sum of its
+                  parts (content-based widths), not forced full-row. */}
+              <ActionCard border="gray" disabled={routineHoldDisabled} overlayText={routineHoldOverlay} wide>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <input
                     value={newHold.holdMark}
                     onChange={(e) => setNewHold({ ...newHold, holdMark: e.target.value })}
                     placeholder="T-mark HH:MM:SS"
-                    className="input flex-1 text-xs"
+                    className="input w-32 text-xs"
                     disabled={routineHoldDisabled}
                   />
                   <input
                     value={newHold.duration}
                     onChange={(e) => setNewHold({ ...newHold, duration: e.target.value })}
                     placeholder="Duration HH:MM:SS"
-                    className="input flex-1 text-xs"
+                    className="input w-32 text-xs"
                     disabled={routineHoldDisabled}
                   />
                   <input
                     value={newHold.reason}
                     onChange={(e) => setNewHold({ ...newHold, reason: e.target.value })}
                     placeholder="Reason (optional)"
-                    className="input flex-1 text-xs"
+                    className="input w-40 text-xs"
                     disabled={routineHoldDisabled}
                   />
                   <button
@@ -887,9 +941,9 @@ function HoldManagement({
               Section 3 - DUR variant's field+button now horizontal, same
               height/width as the INDEF card beside it; Section 4 - INDEF is
               orange, DUR group is gray) */}
-          <div className="mb-5">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">LWCC Rec Hold Actions</div>
-            <div className={gridClass2}>
+          <div className="mb-8 border-t border-slate-800/70 pt-5">
+            <div className={sectionTitleClass}>LWCC Rec Hold Actions</div>
+            <div className={actionRowClass}>
               <ActionCard border="orange" disabled={lwccRecDisabled} overlayText={lwccRecOverlay}>
                 <button
                   onClick={() => setHoldConfirm({ label: "Weather Hold (Indefinite)", reason: weatherHoldReason, editable: false })}
@@ -899,13 +953,13 @@ function HoldManagement({
                   Wx Hold — Indef
                 </button>
               </ActionCard>
-              <ActionCard border="gray" disabled={lwccRecDisabled} overlayText={lwccRecOverlay}>
+              <ActionCard border="gray" disabled={lwccRecDisabled} overlayText={lwccRecOverlay} wide>
                 <div className="flex items-center gap-2">
                   <input
                     value={weatherHoldDuration}
                     onChange={(e) => setWeatherHoldDuration(e.target.value)}
                     placeholder="Duration HH:MM:SS"
-                    className="input flex-1 text-xs"
+                    className="input w-32 text-xs"
                     disabled={lwccRecDisabled}
                   />
                   <button
@@ -935,25 +989,32 @@ function HoldManagement({
           {/* PEMSG Rec Hold Actions (v9.5 Section 1 - no "Part N" numbering;
               Section 3 - DUR variant horizontal; Section 4 - INDEF orange,
               DUR group gray) */}
-          <div>
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">PEMSG Rec Hold Actions</div>
-            <div className={gridClass2}>
+          <div className="border-t border-slate-800/70 pt-5">
+            <div className={sectionTitleClass}>PEMSG Rec Hold Actions</div>
+            <div className={actionRowClass}>
               <ActionCard border="orange" disabled={pemsgRecDisabled} overlayText={pemsgRecOverlay}>
                 <button
-                  onClick={() => setHoldConfirm({ label: "PEMSG Hold (Indefinite)", reason: pemsgHoldReason, editable: false })}
+                  onClick={() =>
+                    setHoldConfirm({
+                      label: "PEMSG Hold (Indefinite)",
+                      reason: pemsgHoldReason,
+                      editable: false,
+                      pemsgMessageId: targetPemsgHold?.id,
+                    })
+                  }
                   disabled={pemsgRecDisabled}
                   className="btn-secondary w-full text-xs disabled:opacity-50"
                 >
                   PEMSG Hold — Indef
                 </button>
               </ActionCard>
-              <ActionCard border="gray" disabled={pemsgRecDisabled} overlayText={pemsgRecOverlay}>
+              <ActionCard border="gray" disabled={pemsgRecDisabled} overlayText={pemsgRecOverlay} wide>
                 <div className="flex items-center gap-2">
                   <input
                     value={pemsgHoldDuration}
                     onChange={(e) => setPemsgHoldDuration(e.target.value)}
                     placeholder="Duration HH:MM:SS"
-                    className="input flex-1 text-xs"
+                    className="input w-32 text-xs"
                     disabled={pemsgRecDisabled}
                   />
                   <button
@@ -962,6 +1023,7 @@ function HoldManagement({
                         holdMarkSeconds: Math.max(0, Math.round(tMinus ?? state.currentTMinusSeconds ?? 0) - 3),
                         estimatedDurationSeconds: hmsToSeconds(pemsgHoldDuration),
                         reason: pemsgHoldReason,
+                        pemsgMessageId: targetPemsgHold?.id,
                       })
                     }
                     disabled={pemsgRecDisabled}
@@ -970,6 +1032,18 @@ function HoldManagement({
                     PEMSG Hold — Dur
                   </button>
                 </div>
+              </ActionCard>
+              {/* v9.6 Section 2 - WAIVE: gray border (routine/administrative
+                  dismissal, not one of the three indefinite-hold actions),
+                  standard single-button width. */}
+              <ActionCard border="gray" disabled={pemsgRecDisabled} overlayText={pemsgRecOverlay}>
+                <button
+                  onClick={() => targetPemsgHold && waiveMutation.mutate(targetPemsgHold.id)}
+                  disabled={pemsgRecDisabled}
+                  className="btn-secondary w-full text-xs disabled:opacity-50"
+                >
+                  Waive
+                </button>
               </ActionCard>
             </div>
           </div>
@@ -999,7 +1073,7 @@ function HoldManagement({
                 Cancel
               </button>
               <button
-                onClick={() => callHoldMutation.mutate(holdConfirm.reason)}
+                onClick={() => callHoldMutation.mutate({ reason: holdConfirm.reason, pemsgMessageId: holdConfirm.pemsgMessageId })}
                 disabled={!holdConfirm.reason.trim()}
                 className="btn-danger disabled:opacity-50"
               >
