@@ -9,6 +9,7 @@ import {
   fetchCoas,
   fetchCountdownState,
   fetchDocuments,
+  fetchLaunchStatusCheck,
   fetchLwccState,
   fetchMilestoneTemplateOptions,
   fetchMissionComms,
@@ -31,6 +32,7 @@ import { usePreferences } from "../context/PreferencesContext";
 import { tickTMinusSeconds } from "../utils/countdownMath";
 import { formatTimestamp } from "../utils/time";
 import { DocumentLink } from "./DocumentLink";
+import { CompletionBanner } from "./LaunchStatusCheck";
 import { COMR_DOCUMENT_CATEGORY, LOT_CERTIFICATION_TEXTS } from "../types";
 import type { Mission, MissionHold } from "../types";
 
@@ -251,9 +253,13 @@ function CofrComplianceGateAlert({ mission, hold }: { mission: Mission; hold: Mi
   );
 }
 
-// v9.3 Section 3.3.1 - functional border color-coding for every action
-// button/field group in Box Three: white = point-of-no-return/proceed, red
-// = stop/halt/undo, orange = schedule/duration-modifying, gray = routine.
+// v9.5 Section 4 - restrained color scheme, fully replacing v9.3 Section
+// 3.3.1's broader 4-tier scheme. Color now marks only seven buttons in the
+// whole console: red = ABORT/RTS only; orange = the three indefinite-hold
+// buttons (CALL HOLD, WX HOLD - INDEF, PEMSG HOLD - INDEF); white = ARM
+// TERMINAL COUNT, MARK LIFTOFF, XMIT CCS TO VFS. Every other button/field
+// group - SEL NEW LOT, REC TO MARK, REVOKE ARM, the ADD PGM HOLD group, and
+// both DUR-variant groups - is plain gray.
 // Every card is always rendered (the directive's governing principle: a
 // control is never simply absent) - when `disabled`, the control(s) inside
 // stay in the DOM (disabled, not removed) beneath an overlay stating why,
@@ -430,6 +436,21 @@ function HoldManagement({
       ? `PEMSG REC HOLD — ${outstandingPemsgHold[0].senderRole} — ${outstandingPemsgHold[0].detail ?? outstandingPemsgHold[0].line}`
       : "";
 
+  // v9.5 Section 5 - LSC State panel data. Same query key the Polls tab and
+  // Range Ops Display use (LaunchStatusCheckBoard), so this never computes
+  // completion a second, parallel way - per v9.4 Section 1's own
+  // instruction, this and the ERROR HOLD gate must never be able to
+  // disagree. lscErrorHoldActive reads the ERROR hold's own presence
+  // (rather than re-deriving "T-Count passed T-10:00:00 without LSC
+  // completion" client-side) for the same reason.
+  const { data: lscCheck } = useQuery({
+    queryKey: ["launch-status-check", mission.id],
+    queryFn: () => fetchLaunchStatusCheck(mission.id),
+    refetchInterval: 15_000,
+  });
+  const lscComplete = !!lscCheck?.completion.isGo;
+  const lscErrorHoldActive = state.holds.some((h: MissionHold) => h.status === "ACTIVE" && h.type === "ERROR");
+
   // --- v9.3 Section 3.3.3 Terminal Count Arm derived state ---
   const armed = !!state.terminalCountArmedAt;
   const xmitted = !!state.terminalCountXmitAt;
@@ -439,7 +460,7 @@ function HoldManagement({
   let armOverlay: string | undefined;
   if (!state.lot) armOverlay = "N/A — NO LOT ESTABLISHED";
   else if (armed) armOverlay = "N/A — ALREADY ARMED";
-  else if (!armWindowOpen) armOverlay = "N/A — OPENS AT T-10:00";
+  else if (!armWindowOpen) armOverlay = "N/A — OPENS AT T-10:00:00";
   const armDisabled = !!armOverlay;
 
   const revokeOverlay = !armed ? "N/A — NOT ARMED" : undefined;
@@ -490,6 +511,10 @@ function HoldManagement({
   const pemsgRecDisabled = !!pemsgRecOverlay;
 
   const gridClass = "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4";
+  // v9.5 Section 3 - the LWCC/PEMSG Rec Hold Actions groups are exactly two
+  // cards each (INDEF + DUR); a 2-up grid keeps both cards the same width,
+  // rather than the 4-up grid stretching to leave two columns unused.
+  const gridClass2 = "grid grid-cols-1 gap-3 sm:grid-cols-2";
 
   return (
     <>
@@ -498,60 +523,76 @@ function HoldManagement({
         <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Test Clock Holds</div>
 
         {activeHold && (
-          <div className="mb-3 rounded-md border border-aat-caution bg-aat-caution/10 p-3">
+          <div
+            className={`mb-3 rounded-md border p-3 ${activeHold.type === "ERROR" ? "border-aat-nogo bg-aat-nogo/10" : "border-aat-caution bg-aat-caution/10"}`}
+          >
             <div className="flex items-center justify-between text-sm">
               <div>
-                <strong>ACTIVE HOLD</strong> at T-{secondsToHms(activeHold.holdMarkSeconds)} — {activeHold.type}
+                <strong>{activeHold.type === "ERROR" ? "ERROR HOLD" : "ACTIVE HOLD"}</strong> at T-{secondsToHms(activeHold.holdMarkSeconds)}
+                {activeHold.type !== "ERROR" ? ` — ${activeHold.type}` : ""}
                 {activeHold.reason ? ` — ${activeHold.reason}` : ""}
               </div>
               <div className="flex items-center gap-3">
-                {isLaunchDirector && activeHold.type === "PROGRAMMED" && (
-                  <label className="flex items-center gap-1.5 text-xs">
-                    <span className={activeHold.autoProceed ? "text-slate-500" : "font-semibold"}>Manual-Proceed</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={activeHold.autoProceed}
-                      onClick={() => {
-                        if (activeHold.autoProceed) {
-                          // Auto -> Manual: immediate, no confirmation.
-                          autoProceedMutation.mutate({ holdId: activeHold.id, autoProceed: false });
-                        } else {
-                          // Manual -> Auto: lightweight single confirmation.
-                          setShowAutoConfirm(true);
-                        }
-                      }}
-                      className={`relative h-4 w-8 shrink-0 rounded-full transition-colors ${activeHold.autoProceed ? "bg-aat-accent" : "bg-slate-600"}`}
-                    >
-                      <span
-                        className={`absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${activeHold.autoProceed ? "translate-x-4" : "translate-x-0"}`}
-                      />
-                    </button>
-                    <span className={activeHold.autoProceed ? "font-semibold text-aat-accent" : "text-slate-500"}>Auto-Proceed</span>
-                  </label>
-                )}
-                {isLaunchDirector && !activeHold.isCofrComplianceHold && (
-                  <div className="flex flex-col items-end gap-1">
-                    <button
-                      onClick={() => releaseHoldMutation.mutate(activeHold.id)}
-                      disabled={activeHold.isTerminalCountAutoHold && !armed}
-                      className="btn-primary text-xs disabled:opacity-50"
-                    >
-                      Proceed Through Hold
-                    </button>
-                    {/* v9.3 Section 3.3.3 - the Terminal Count Not Authorized
-                        auto-hold cannot be released via this control alone;
-                        ARM TERMINAL COUNT (Part 2 of Box Three) must be
-                        actuated first. Shown grayed with the reason rather
-                        than removed, per the directive's governing
-                        principle. */}
-                    {activeHold.isTerminalCountAutoHold && !armed && (
-                      <span className="text-[10px] font-semibold uppercase text-aat-nogo">Requires Arm Terminal Count (Part 2)</span>
+                {/* v9.4 Section 1.4 - the LSC Verification Error Hold carries
+                    neither a Proceed Through Hold button nor an Auto/Manual
+                    toggle at all, since neither applies to a hold that is
+                    genuinely unreleasable by any manual action - displaying
+                    either would be misleading. It clears only via its own
+                    condition-based auto-release (recapped in the LSC State
+                    panel, Box Two, below). */}
+                {activeHold.type === "ERROR" ? (
+                  <span className="text-xs font-semibold uppercase text-aat-nogo">Clears automatically upon LSC completion — not manually releasable</span>
+                ) : (
+                  <>
+                    {isLaunchDirector && activeHold.type === "PROGRAMMED" && (
+                      <label className="flex items-center gap-1.5 text-xs">
+                        <span className={activeHold.autoProceed ? "text-slate-500" : "font-semibold"}>Manual-Proceed</span>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={activeHold.autoProceed}
+                          onClick={() => {
+                            if (activeHold.autoProceed) {
+                              // Auto -> Manual: immediate, no confirmation.
+                              autoProceedMutation.mutate({ holdId: activeHold.id, autoProceed: false });
+                            } else {
+                              // Manual -> Auto: lightweight single confirmation.
+                              setShowAutoConfirm(true);
+                            }
+                          }}
+                          className={`relative h-4 w-8 shrink-0 rounded-full transition-colors ${activeHold.autoProceed ? "bg-aat-accent" : "bg-slate-600"}`}
+                        >
+                          <span
+                            className={`absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${activeHold.autoProceed ? "translate-x-4" : "translate-x-0"}`}
+                          />
+                        </button>
+                        <span className={activeHold.autoProceed ? "font-semibold text-aat-accent" : "text-slate-500"}>Auto-Proceed</span>
+                      </label>
                     )}
-                  </div>
-                )}
-                {activeHold.isCofrComplianceHold && (
-                  <span className="text-xs font-semibold text-aat-nogo">See CoFR Compliance alert above</span>
+                    {isLaunchDirector && !activeHold.isCofrComplianceHold && (
+                      <div className="flex flex-col items-end gap-1">
+                        <button
+                          onClick={() => releaseHoldMutation.mutate(activeHold.id)}
+                          disabled={activeHold.isTerminalCountAutoHold && !armed}
+                          className="btn-primary text-xs disabled:opacity-50"
+                        >
+                          Proceed Through Hold
+                        </button>
+                        {/* v9.3 Section 3.3.3 - the Terminal Count Not
+                            Authorized auto-hold cannot be released via this
+                            control alone; ARM TERMINAL COUNT (Terminal
+                            Count Arm, Box Three) must be actuated first.
+                            Shown grayed with the reason rather than
+                            removed, per the governing principle. */}
+                        {activeHold.isTerminalCountAutoHold && !armed && (
+                          <span className="text-[10px] font-semibold uppercase text-aat-nogo">Requires Arm Terminal Count</span>
+                        )}
+                      </div>
+                    )}
+                    {activeHold.isCofrComplianceHold && (
+                      <span className="text-xs font-semibold text-aat-nogo">See CoFR Compliance alert above</span>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -609,12 +650,16 @@ function HoldManagement({
         </div>
       </section>
 
-      {/* v9.3 Section 3.2 - Box Two: Hold Recommendations (display only, no
-          action buttons - every action has its own home in Box Three Parts
-          4/5 now). LWCC Recommendation Panel stacked directly above the
-          PEMSG panel, top to bottom, each functioning exactly as before. */}
+      {/* v9.3 Section 3.2 - Box Two: Hold Recommendations and LSC State
+          (renamed per v9.5 Section 5.1). Display only, no action buttons -
+          every action has its own home in Box Three's LWCC/PEMSG Rec Hold
+          Actions groups. Three stacked panels, top to bottom: LWCC
+          Recommendation Panel, PEMSG panel (both unchanged), and the LSC
+          State panel (v9.5 Section 5.3, new) - this fully supersedes v9.4
+          Section 2's separate top-of-cluster LWCC Compliance Status
+          banner, which is not built at all. */}
       <section className="card p-5">
-        <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Hold Recommendations</div>
+        <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Hold Recommendations and LSC State</div>
 
         <div className="mb-4">
           <div className="mb-2 flex items-center justify-between">
@@ -662,6 +707,32 @@ function HoldManagement({
             </div>
           )}
         </div>
+
+        {/* v9.5 Section 5.3 - LSC State panel: four states, all driven by
+            data already computed elsewhere (lscCheck.completion from the
+            same endpoint the Polls tab/Range Ops Display read, and the
+            ERROR hold's own presence in state.holds) - never a second,
+            parallel check that could disagree with the actual gate. */}
+        <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">LSC State</div>
+          {!lscCheck ? (
+            <div className="text-xs text-slate-400">Loading LSC state...</div>
+          ) : lscComplete ? (
+            <CompletionBanner check={lscCheck} useZulu={useZulu} />
+          ) : lscErrorHoldActive ? (
+            <div className="border-2 border-aat-nogo bg-aat-nogo/10 px-3 py-2 text-center text-xs font-bold uppercase tracking-wide text-aat-nogo">
+              LSC NOT VERIFIED BY T-10:00:00 — AWAITING LSC COMPLETION
+            </div>
+          ) : tMinus != null && tMinus <= 900 ? (
+            <div className="border-2 border-aat-caution bg-aat-caution/10 px-3 py-2 text-center text-xs font-bold uppercase tracking-wide text-aat-caution">
+              LSC NOT PERFORMED
+            </div>
+          ) : (
+            <div className="border-2 border-zinc-700 bg-zinc-900/40 px-3 py-2 text-center text-xs font-bold uppercase tracking-wide text-zinc-400">
+              LSC NOT PERFORMED
+            </div>
+          )}
+        </div>
       </section>
 
       {/* v9.3 Section 3.3 - Box Three: CCS and Hold Actions (LD-only, as
@@ -685,9 +756,9 @@ function HoldManagement({
             )}
           </div>
 
-          {/* Part 1 - CCS Time Control Actions */}
+          {/* Time Control Actions (v9.5 Section 1 - no "Part N" numbering) */}
           <div className="mb-5">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Part 1 — Time Control Actions</div>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Time Control Actions</div>
             <div className={gridClass}>
               <ActionCard border="white" disabled={liftoffDisabled} overlayText={liftoffOverlay}>
                 <button
@@ -702,7 +773,8 @@ function HoldManagement({
                   Mark Liftoff
                 </button>
               </ActionCard>
-              <ActionCard border="orange" disabled={selNewLotDisabled} overlayText={selNewLotOverlay}>
+              {/* v9.5 Section 4 - SEL NEW LOT is now plain gray (was orange). */}
+              <ActionCard border="gray" disabled={selNewLotDisabled} overlayText={selNewLotOverlay}>
                 <button onClick={() => setShowRevise(true)} disabled={selNewLotDisabled} className="btn-secondary w-full text-xs disabled:opacity-50">
                   Sel New LOT
                 </button>
@@ -720,9 +792,9 @@ function HoldManagement({
             </div>
           </div>
 
-          {/* Part 2 - CCS Terminal Count Arm (v9.3 Section 3.3.3, new) */}
+          {/* Terminal Count Arm (v9.3 Section 3.3.3, new logic; v9.5 Section 1 - no "Part N" numbering) */}
           <div className="mb-5">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Part 2 — Terminal Count Arm</div>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Terminal Count Arm</div>
             <div className={gridClass}>
               <ActionCard border="white" disabled={armDisabled} overlayText={armOverlay}>
                 <button onClick={() => armMutation.mutate()} disabled={armDisabled} className="btn-primary w-full text-xs disabled:opacity-50">
@@ -732,8 +804,9 @@ function HoldManagement({
                   <div className="font-mono text-[10px] text-aat-caution">AUTHORIZE BY: {secondsToHms(tMinus - 180)} REMAINING</div>
                 )}
               </ActionCard>
-              <ActionCard border="red" disabled={revokeDisabled} overlayText={revokeOverlay}>
-                <button onClick={() => revokeMutation.mutate()} disabled={revokeDisabled} className="btn-danger w-full text-xs disabled:opacity-50">
+              {/* v9.5 Section 4 - REVOKE ARM is now plain gray (was red). */}
+              <ActionCard border="gray" disabled={revokeDisabled} overlayText={revokeOverlay}>
+                <button onClick={() => revokeMutation.mutate()} disabled={revokeDisabled} className="btn-secondary w-full text-xs disabled:opacity-50">
                   Revoke Arm
                 </button>
               </ActionCard>
@@ -750,82 +823,89 @@ function HoldManagement({
             )}
           </div>
 
-          {/* Part 3 - CCS Routine Hold Actions */}
+          {/* Routine Hold Actions (v9.5 Section 2 - CALL HOLD alone as its
+              own row; T-mark/Duration/Reason/ADD PGM HOLD in one single
+              bordered group, one overlay, arranged horizontally - matching
+              the pattern the LWCC/PEMSG Rec Hold Actions groups already
+              use, rather than a separate card per field/button.) */}
           <div className="mb-5">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Part 3 — Routine Hold Actions</div>
-            <div className={gridClass}>
-              <ActionCard border="red" disabled={routineHoldDisabled} overlayText={routineHoldOverlay}>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Routine Hold Actions</div>
+            <div className="space-y-3">
+              {/* v9.5 Section 4 - CALL HOLD is one of the three indefinite
+                  hold buttons: orange (was red). */}
+              <ActionCard border="orange" disabled={routineHoldDisabled} overlayText={routineHoldOverlay}>
                 <button
                   onClick={() => setHoldConfirm({ label: "Call Hold", reason: "", editable: true })}
                   disabled={routineHoldDisabled}
-                  className="btn-danger w-full text-xs disabled:opacity-50"
+                  className="btn-secondary w-full text-xs disabled:opacity-50"
                 >
                   Call Hold
                 </button>
               </ActionCard>
               <ActionCard border="gray" disabled={routineHoldDisabled} overlayText={routineHoldOverlay}>
-                <div className="space-y-1.5">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <input
                     value={newHold.holdMark}
                     onChange={(e) => setNewHold({ ...newHold, holdMark: e.target.value })}
                     placeholder="T-mark HH:MM:SS"
-                    className="input text-xs"
+                    className="input flex-1 text-xs"
                     disabled={routineHoldDisabled}
                   />
                   <input
                     value={newHold.duration}
                     onChange={(e) => setNewHold({ ...newHold, duration: e.target.value })}
                     placeholder="Duration HH:MM:SS"
-                    className="input text-xs"
+                    className="input flex-1 text-xs"
                     disabled={routineHoldDisabled}
                   />
                   <input
                     value={newHold.reason}
                     onChange={(e) => setNewHold({ ...newHold, reason: e.target.value })}
                     placeholder="Reason (optional)"
-                    className="input text-xs"
+                    className="input flex-1 text-xs"
                     disabled={routineHoldDisabled}
                   />
+                  <button
+                    onClick={() =>
+                      addHold.mutate({
+                        holdMarkSeconds: hmsToSeconds(newHold.holdMark),
+                        estimatedDurationSeconds: hmsToSeconds(newHold.duration),
+                        reason: newHold.reason,
+                      })
+                    }
+                    disabled={routineHoldDisabled}
+                    className="btn-secondary shrink-0 text-xs disabled:opacity-50"
+                  >
+                    Add Pgm Hold
+                  </button>
                 </div>
-              </ActionCard>
-              <ActionCard border="orange" disabled={routineHoldDisabled} overlayText={routineHoldOverlay}>
-                <button
-                  onClick={() =>
-                    addHold.mutate({
-                      holdMarkSeconds: hmsToSeconds(newHold.holdMark),
-                      estimatedDurationSeconds: hmsToSeconds(newHold.duration),
-                      reason: newHold.reason,
-                    })
-                  }
-                  disabled={routineHoldDisabled}
-                  className="btn-secondary w-full text-xs disabled:opacity-50"
-                >
-                  Add Pgm Hold
-                </button>
               </ActionCard>
             </div>
           </div>
 
-          {/* Part 4 - LWCC Rec Hold Actions */}
+          {/* LWCC Rec Hold Actions (v9.5 Section 1 - no "Part N" numbering;
+              Section 3 - DUR variant's field+button now horizontal, same
+              height/width as the INDEF card beside it; Section 4 - INDEF is
+              orange, DUR group is gray) */}
           <div className="mb-5">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Part 4 — LWCC Rec Hold Actions</div>
-            <div className={gridClass}>
-              <ActionCard border="red" disabled={lwccRecDisabled} overlayText={lwccRecOverlay}>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">LWCC Rec Hold Actions</div>
+            <div className={gridClass2}>
+              <ActionCard border="orange" disabled={lwccRecDisabled} overlayText={lwccRecOverlay}>
                 <button
                   onClick={() => setHoldConfirm({ label: "Weather Hold (Indefinite)", reason: weatherHoldReason, editable: false })}
                   disabled={lwccRecDisabled}
-                  className="btn-danger w-full text-xs disabled:opacity-50"
+                  className="btn-secondary w-full text-xs disabled:opacity-50"
                 >
                   Wx Hold — Indef
                 </button>
               </ActionCard>
-              <ActionCard border="orange" disabled={lwccRecDisabled} overlayText={lwccRecOverlay}>
-                <div className="space-y-1.5">
+              <ActionCard border="gray" disabled={lwccRecDisabled} overlayText={lwccRecOverlay}>
+                <div className="flex items-center gap-2">
                   <input
                     value={weatherHoldDuration}
                     onChange={(e) => setWeatherHoldDuration(e.target.value)}
                     placeholder="Duration HH:MM:SS"
-                    className="input text-xs"
+                    className="input flex-1 text-xs"
                     disabled={lwccRecDisabled}
                   />
                   <button
@@ -843,7 +923,7 @@ function HoldManagement({
                       })
                     }
                     disabled={lwccRecDisabled}
-                    className="btn-secondary w-full text-xs disabled:opacity-50"
+                    className="btn-secondary shrink-0 text-xs disabled:opacity-50"
                   >
                     Wx Hold — Dur
                   </button>
@@ -852,26 +932,28 @@ function HoldManagement({
             </div>
           </div>
 
-          {/* Part 5 - PEMSG Rec Hold Actions */}
+          {/* PEMSG Rec Hold Actions (v9.5 Section 1 - no "Part N" numbering;
+              Section 3 - DUR variant horizontal; Section 4 - INDEF orange,
+              DUR group gray) */}
           <div>
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Part 5 — PEMSG Rec Hold Actions</div>
-            <div className={gridClass}>
-              <ActionCard border="red" disabled={pemsgRecDisabled} overlayText={pemsgRecOverlay}>
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">PEMSG Rec Hold Actions</div>
+            <div className={gridClass2}>
+              <ActionCard border="orange" disabled={pemsgRecDisabled} overlayText={pemsgRecOverlay}>
                 <button
                   onClick={() => setHoldConfirm({ label: "PEMSG Hold (Indefinite)", reason: pemsgHoldReason, editable: false })}
                   disabled={pemsgRecDisabled}
-                  className="btn-danger w-full text-xs disabled:opacity-50"
+                  className="btn-secondary w-full text-xs disabled:opacity-50"
                 >
                   PEMSG Hold — Indef
                 </button>
               </ActionCard>
-              <ActionCard border="orange" disabled={pemsgRecDisabled} overlayText={pemsgRecOverlay}>
-                <div className="space-y-1.5">
+              <ActionCard border="gray" disabled={pemsgRecDisabled} overlayText={pemsgRecOverlay}>
+                <div className="flex items-center gap-2">
                   <input
                     value={pemsgHoldDuration}
                     onChange={(e) => setPemsgHoldDuration(e.target.value)}
                     placeholder="Duration HH:MM:SS"
-                    className="input text-xs"
+                    className="input flex-1 text-xs"
                     disabled={pemsgRecDisabled}
                   />
                   <button
@@ -883,7 +965,7 @@ function HoldManagement({
                       })
                     }
                     disabled={pemsgRecDisabled}
-                    className="btn-secondary w-full text-xs disabled:opacity-50"
+                    className="btn-secondary shrink-0 text-xs disabled:opacity-50"
                   >
                     PEMSG Hold — Dur
                   </button>

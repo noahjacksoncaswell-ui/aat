@@ -70,6 +70,9 @@ enum MissionHistoryEventType {
   TERMINAL_COUNT_REVOKED
   TERMINAL_COUNT_AUTO_HOLD
   XMIT_CCS_TO_VFS
+  // v9.4 Section 1 - LSC Verification Error Hold gate events.
+  LSC_ERROR_HOLD_RAISED
+  LSC_ERROR_HOLD_RESOLVED
 }
 
 // v5.0 Section 7.4 - basis for LOT Submission certification checkbox 8. Set
@@ -107,6 +110,11 @@ enum TCountStatus {
 enum HoldType {
   PROGRAMMED
   UNSCHEDULED
+  // v9.4 Section 1 - the LSC Verification Error Hold: a distinct hold
+  // type (not a PROGRAMMED/UNSCHEDULED variant), auto-inserted at T-10:00
+  // if the Launch Status Check has not completed, and genuinely
+  // unreleasable except by LSC's own completion event.
+  ERROR
 }
 
 enum HoldStatus {

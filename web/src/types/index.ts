@@ -281,7 +281,7 @@ export interface NotamFiling {
 // --- Countdown (Section 6.2) ---
 
 export type TCountStatus = "PENDING" | "COUNTING" | "HOLDING" | "STOPPED" | "COMPLETE";
-export type HoldType = "PROGRAMMED" | "UNSCHEDULED";
+export type HoldType = "PROGRAMMED" | "UNSCHEDULED" | "ERROR";
 export type HoldStatus = "SCHEDULED" | "ACTIVE" | "DURATION_ELAPSED" | "RELEASED";
 
 export interface MissionHold {
@@ -295,8 +295,8 @@ export interface MissionHold {
   // a LOT Certification's 24-hour CoFR compliance deadline lapses.
   isCofrComplianceHold?: boolean;
   // v9.3 Section 3.3.3 - true only for the system-triggered hold raised
-  // when ARM TERMINAL COUNT was not actuated by T-3:00. Cannot be released
-  // via the ordinary Proceed Through Hold action until armed.
+  // when ARM TERMINAL COUNT was not actuated by T-03:00:00. Cannot be
+  // released via the ordinary Proceed Through Hold action until armed.
   isTerminalCountAutoHold?: boolean;
   reason?: string | null;
   actualStartedAt?: string | null;

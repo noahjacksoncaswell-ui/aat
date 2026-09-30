@@ -50,6 +50,8 @@ const MISSION_HISTORY_LABELS: Record<string, string> = {
   TERMINAL_COUNT_REVOKED: "Terminal Count Arm Revoked",
   TERMINAL_COUNT_AUTO_HOLD: "Terminal Count Not Authorized - Hold Forced",
   XMIT_CCS_TO_VFS: "CCS Transmitted to VFS",
+  LSC_ERROR_HOLD_RAISED: "LSC Verification Error Hold Raised",
+  LSC_ERROR_HOLD_RESOLVED: "LSC Verification Error Hold Resolved",
 };
 
 // v9.2 Section 6.3 - these MissionHistoryEventTypes are countdown/clock
@@ -70,6 +72,8 @@ const CCS_HISTORY_EVENT_TYPES = new Set([
   "TERMINAL_COUNT_REVOKED",
   "TERMINAL_COUNT_AUTO_HOLD",
   "XMIT_CCS_TO_VFS",
+  "LSC_ERROR_HOLD_RAISED",
+  "LSC_ERROR_HOLD_RESOLVED",
 ]);
 
 // v9.0 Section 3.2 - LWCC hold recommendations: the v5.3 Recommendation

@@ -1,8 +1,15 @@
 import { Mission, MissionHold, MissionHistoryEventType } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { broadcastMissionUpdate } from "../websocket";
-import { computeTCountSeconds, TERMINAL_COUNT_DEADLINE_SECONDS, TERMINAL_COUNT_AUTO_HOLD_REASON } from "./countdown";
+import {
+  computeTCountSeconds,
+  TERMINAL_COUNT_DEADLINE_SECONDS,
+  TERMINAL_COUNT_AUTO_HOLD_REASON,
+  LSC_ERROR_HOLD_GATE_SECONDS,
+  LSC_ERROR_HOLD_REASON,
+} from "./countdown";
 import { COFR_DOCUMENT_CATEGORY } from "./lotCertification";
+import { computeLscState, loadMissionForLscState } from "./lscState";
 
 /**
  * Revision Directive v4.1 Item 1 [BLOCKING] - the previous hold-trigger
@@ -161,7 +168,7 @@ async function maybeRaiseCofrComplianceGate(mission: MissionWithHolds): Promise<
 
 /**
  * v9.3 Section 3.3.3 - CCS Terminal Count Arm gate. ARM TERMINAL COUNT must
- * be actuated by T-3:00; if the mission reaches that mark still unarmed,
+ * be actuated by T-03:00:00; if the mission reaches that mark still unarmed,
  * this force-inserts an unscheduled hold flagged `isTerminalCountAutoHold`
  * so it cannot be cleared by the ordinary Release Hold action - only by
  * arming (which POST /terminal-count/arm allows regardless of whether this
@@ -173,12 +180,12 @@ async function maybeRaiseCofrComplianceGate(mission: MissionWithHolds): Promise<
  * picked back up on the very next tick and re-raises the same auto-hold -
  * the deadline cannot be escaped by arming, revoking, and not re-arming.
  */
-async function maybeRaiseTerminalCountGate(mission: MissionWithHolds): Promise<void> {
-  if (mission.holds.some((h) => h.status === "ACTIVE")) return;
-  if (mission.terminalCountArmedAt) return;
+async function maybeRaiseTerminalCountGate(mission: MissionWithHolds): Promise<boolean> {
+  if (mission.holds.some((h) => h.status === "ACTIVE")) return false;
+  if (mission.terminalCountArmedAt) return false;
 
   const currentTMinus = computeTCountSeconds(mission, null);
-  if (currentTMinus == null || currentTMinus > TERMINAL_COUNT_DEADLINE_SECONDS) return;
+  if (currentTMinus == null || currentTMinus > TERMINAL_COUNT_DEADLINE_SECONDS) return false;
 
   await prisma.$transaction(async (tx) => {
     const hold = await tx.missionHold.create({
@@ -203,6 +210,104 @@ async function maybeRaiseTerminalCountGate(mission: MissionWithHolds): Promise<v
     });
   });
   broadcastMissionUpdate(mission.id);
+  return true;
+}
+
+/**
+ * v9.4 Section 1 - LSC Verification Error Hold: a fixed structural
+ * checkpoint at T-10:00:00, independent of whatever discretionary hold the
+ * Launch Director may or may not have programmed for the Launch Status
+ * Check. Reuses computeLscState (services/lscState.ts) - the exact same
+ * completion computation the Polls tab, Range Ops Display, and the CCS
+ * tab's own LSC State panel all read - so this gate can never disagree
+ * with what those displays are showing.
+ *
+ * Mirrors the CoFR/Terminal-Count gates' shape (no-ops while another hold
+ * is ACTIVE), but its release condition is different and stricter: LSC
+ * completion is a one-way, post-completion-locked state (v7.1.1 Section
+ * 2), so once this hold releases (only maybeAutoReleaseLscErrorHold does
+ * that, and only on LSC completion), `computeLscState(...).completion.isGo`
+ * can never revert to false and this function can never fire again for
+ * the mission - functionally identical to "evaluated once, at T-10:00:00"
+ * per Section 1.2, but implemented as a resilient recurring check (like
+ * its sibling gates) so a scheduler restart can never cause it to be
+ * silently skipped.
+ */
+async function maybeRaiseLscErrorHold(mission: MissionWithHolds): Promise<boolean> {
+  if (mission.holds.some((h) => h.status === "ACTIVE")) return false;
+  // Already raised (and, since resolved, released) at some point - LSC
+  // completion is one-way, so it can never need raising again.
+  if (mission.holds.some((h) => h.type === "ERROR")) return false;
+
+  const currentTMinus = computeTCountSeconds(mission, null);
+  if (currentTMinus == null || currentTMinus > LSC_ERROR_HOLD_GATE_SECONDS) return false;
+
+  const fullMission = await loadMissionForLscState(mission.id);
+  if (!fullMission) return false;
+  const lsc = await computeLscState(fullMission);
+  if (lsc.completion.isGo) return false; // LSC already complete - this hold is never created, no visible trace.
+
+  await prisma.$transaction(async (tx) => {
+    const hold = await tx.missionHold.create({
+      data: {
+        missionId: mission.id,
+        type: "ERROR",
+        holdMarkSeconds: Math.round(currentTMinus),
+        status: "ACTIVE",
+        actualStartedAt: new Date(),
+        reason: LSC_ERROR_HOLD_REASON,
+      },
+    });
+    await tx.mission.update({ where: { id: mission.id }, data: { tCountStatus: "HOLDING" } });
+    await tx.missionHistoryEvent.create({
+      data: {
+        missionId: mission.id,
+        eventType: MissionHistoryEventType.LSC_ERROR_HOLD_RAISED,
+        notes: LSC_ERROR_HOLD_REASON,
+        metadata: { holdId: hold.id },
+      },
+    });
+  });
+  broadcastMissionUpdate(mission.id);
+  return true;
+}
+
+/**
+ * v9.4 Section 1.3 - the ERROR HOLD's only release path: condition-based,
+ * the instant LSC's real completion event fires, no button press from
+ * anyone. Checked every tick while the ERROR HOLD is active, independent
+ * of (and in addition to) maybeAutoReleaseHold above, which only ever
+ * touches PROGRAMMED+autoProceed holds and never this one.
+ */
+async function maybeAutoReleaseLscErrorHold(mission: MissionWithHolds): Promise<void> {
+  const activeHold = mission.holds.find((h) => h.status === "ACTIVE" && h.type === "ERROR");
+  if (!activeHold || !activeHold.actualStartedAt) return;
+
+  const fullMission = await loadMissionForLscState(mission.id);
+  if (!fullMission) return;
+  const lsc = await computeLscState(fullMission);
+  if (!lsc.completion.isGo) return;
+
+  const actualDurationSeconds = Math.round((Date.now() - activeHold.actualStartedAt.getTime()) / 1000);
+  await prisma.$transaction([
+    prisma.missionHold.update({
+      where: { id: activeHold.id },
+      data: { status: "RELEASED", actualEndedAt: new Date(), actualDurationSeconds },
+    }),
+    prisma.mission.update({
+      where: { id: mission.id },
+      data: { tCountStatus: "COUNTING", holdOffsetSeconds: { increment: actualDurationSeconds } },
+    }),
+    prisma.missionHistoryEvent.create({
+      data: {
+        missionId: mission.id,
+        eventType: MissionHistoryEventType.LSC_ERROR_HOLD_RESOLVED,
+        notes: `LSC completed; ERROR HOLD auto-released after ${actualDurationSeconds}s`,
+        metadata: { holdId: activeHold.id, actualDurationSeconds },
+      },
+    }),
+  ]);
+  broadcastMissionUpdate(mission.id);
 }
 
 async function tick(): Promise<void> {
@@ -217,10 +322,14 @@ async function tick(): Promise<void> {
         const holdTriggered = await triggerNextScheduledHold(mission);
         if (!holdTriggered) {
           const cofrGateRaised = await maybeRaiseCofrComplianceGate(mission);
-          if (!cofrGateRaised) await maybeRaiseTerminalCountGate(mission);
+          if (!cofrGateRaised) {
+            const terminalGateRaised = await maybeRaiseTerminalCountGate(mission);
+            if (!terminalGateRaised) await maybeRaiseLscErrorHold(mission);
+          }
         }
       } else if (mission.tCountStatus === "HOLDING") {
         await maybeAutoReleaseHold(mission);
+        await maybeAutoReleaseLscErrorHold(mission);
       }
     } catch (err) {
       // eslint-disable-next-line no-console

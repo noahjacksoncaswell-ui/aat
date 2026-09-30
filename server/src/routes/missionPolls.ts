@@ -4,7 +4,8 @@ import { MissionRole, Role } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { broadcastMissionUpdate } from "../websocket";
 import { computeProjectedLiftoff } from "../services/countdown";
-import { POLL_ITEM_CATALOG, computeUnsatisfiedItems, getPollItemDef } from "../services/pollItems";
+import { getPollItemDef } from "../services/pollItems";
+import { airspaceChecklist, computeLscState, loadMissionForLscState } from "../services/lscState";
 
 // v7.1 Section 3 - Launch Status Check (role-owned polls). Replaces the
 // flat GoNoGoPoll list's role on the Polls tab; that model, its routes,
@@ -14,53 +15,6 @@ const router = Router({ mergeParams: true });
 
 function missionId(req: any): string {
   return (req.params as { missionId: string }).missionId;
-}
-
-async function loadMissionForPolls(mId: string) {
-  return prisma.mission.findUnique({
-    where: { id: mId },
-    include: {
-      launchPeriodEntries: true,
-      holds: { orderBy: { holdMarkSeconds: "desc" } },
-      notamFilings: { orderBy: { createdAt: "desc" }, take: 1 },
-      launchDayNotifications: true,
-      launchCountTimeConfirmedBy: { select: { id: true, name: true } },
-    },
-  });
-}
-type MissionForPolls = NonNullable<Awaited<ReturnType<typeof loadMissionForPolls>>>;
-
-// Section 3.5 - Airspace's computed value: UNPOLLED more than 24h out;
-// otherwise GO only once the NOTAM filing, T-60, and T-15 notifications
-// are all complete (Termination is deliberately excluded from this check).
-function computeAirspaceStatus(mission: MissionForPolls, now: Date): "UNPOLLED" | "GO" | "NO_GO" {
-  const targeted = mission.launchPeriodEntries.find((e) => e.isTargeted);
-  if (!targeted) return "UNPOLLED";
-  const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-  if (targeted.windowOpen > in24h) return "UNPOLLED";
-
-  const { notamFiled, t60Complete, t15Complete } = airspaceChecklist(mission);
-  return notamFiled && t60Complete && t15Complete ? "GO" : "NO_GO";
-}
-
-function airspaceChecklist(mission: MissionForPolls) {
-  const t60 = mission.launchDayNotifications.find((n) => n.notificationType === "T_MINUS_60");
-  const t15 = mission.launchDayNotifications.find((n) => n.notificationType === "T_MINUS_15");
-  return {
-    notamFiled: !!mission.notamFilings[0]?.filedDate,
-    t60Complete: !!t60 && (t60.satisfied || t60.notApplicable),
-    t15Complete: !!t15 && (t15.satisfied || t15.notApplicable),
-  };
-}
-
-function sameMinuteUtc(a: Date, b: Date): boolean {
-  return (
-    a.getUTCFullYear() === b.getUTCFullYear() &&
-    a.getUTCMonth() === b.getUTCMonth() &&
-    a.getUTCDate() === b.getUTCDate() &&
-    a.getUTCHours() === b.getUTCHours() &&
-    a.getUTCMinutes() === b.getUTCMinutes()
-  );
 }
 
 // Accepts "1432", "14:32", "14:32:00" (seconds ignored - confirmation is
@@ -76,67 +30,8 @@ function parseZuluTimeToMinutes(input: string): number | null {
   return hours * 60 + minutes;
 }
 
-// v7.1.1 - the single source of truth for Launch Status Check state,
-// shared by every route below (GET /, the item-set/override routes' lock
-// check, and the launch-count-time route's readiness gate) so the
-// sequential-gating and post-completion-lock rules can never drift
-// between the read path and the write paths that must enforce them.
-async function computeLscState(mission: MissionForPolls, now: Date = new Date()) {
-  const storedItems = await prisma.pollItem.findMany({
-    where: { missionId: mission.id },
-    include: { updatedBy: { select: { id: true, name: true } } },
-  });
-
-  const items = POLL_ITEM_CATALOG.map((def) => {
-    const stored = storedItems.find((s) => s.itemKey === def.key);
-    const status = def.computed ? (stored ? stored.status : computeAirspaceStatus(mission, now)) : (stored?.status ?? "UNPOLLED");
-    return {
-      key: def.key,
-      box: def.box,
-      label: def.label,
-      shortLabel: def.shortLabel ?? def.label,
-      status,
-      isOverridden: def.computed ? !!stored : false,
-      updatedByName: stored?.updatedBy?.name ?? null,
-      updatedAt: stored?.updatedAt ?? null,
-    };
-  });
-
-  // Section 1, step 1 - every item, LWCC excluded (it isn't in the
-  // catalog at all - it's a pure live readout, never a stored PollItem).
-  const notGoItems = computeUnsatisfiedItems(items);
-  const readiness = { allGo: notGoItems.length === 0, notGoItems };
-
-  const projectedLiftoff = computeProjectedLiftoff(mission, mission.holds, now);
-  const timeConfirmed =
-    !!mission.launchCountTimeConfirmedValue && !!projectedLiftoff && sameMinuteUtc(mission.launchCountTimeConfirmedValue, projectedLiftoff);
-
-  // Section 1, step 3 - the time confirmation is the actual completion
-  // trigger, not Final Launch Status alone; readiness.allGo (which
-  // already includes LD_FINAL_LAUNCH_STATUS) is a prerequisite for it.
-  const isGo = readiness.allGo && timeConfirmed;
-  const ldItem = items.find((i) => i.key === "LD_FINAL_LAUNCH_STATUS")!;
-  const completedAt = isGo
-    ? new Date(
-        Math.max(new Date(ldItem.updatedAt ?? 0).getTime(), (mission.launchCountTimeConfirmedAt ?? new Date(0)).getTime())
-      ).toISOString()
-    : null;
-
-  return {
-    items,
-    readiness,
-    launchCountTime: {
-      confirmed: timeConfirmed,
-      confirmedAt: mission.launchCountTimeConfirmedAt,
-      confirmedByName: mission.launchCountTimeConfirmedBy?.name ?? null,
-      projectedLiftoff,
-    },
-    completion: { isGo, completedAt },
-  };
-}
-
 router.get("/", async (req, res) => {
-  const mission = await loadMissionForPolls(missionId(req));
+  const mission = await loadMissionForLscState(missionId(req));
   if (!mission) return res.status(404).json({ error: "Mission not found" });
 
   const state = await computeLscState(mission);
@@ -194,7 +89,7 @@ router.post("/launch-count-time", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   const mId = missionId(req);
-  const mission = await loadMissionForPolls(mId);
+  const mission = await loadMissionForLscState(mId);
   if (!mission) return res.status(404).json({ error: "Mission not found" });
 
   const actor = req.user!;
@@ -285,7 +180,7 @@ router.post("/:itemKey", async (req, res) => {
 
   // v7.1.1 Section 2 - post-completion lock: once the LSC is complete, no
   // item may change, by anyone, including Admin Override.
-  const mission = await loadMissionForPolls(mId);
+  const mission = await loadMissionForLscState(mId);
   if (!mission) return res.status(404).json({ error: "Mission not found" });
   if ((await computeLscState(mission)).completion.isGo) {
     return res.status(409).json({ error: "The Launch Status Check is already complete. No further changes are permitted." });
@@ -324,7 +219,7 @@ router.delete("/:itemKey", async (req, res) => {
   if (!def.computed) return res.status(400).json({ error: "This item has no override to clear; set its value directly." });
 
   const mId = missionId(req);
-  const missionForLock = await loadMissionForPolls(mId);
+  const missionForLock = await loadMissionForLscState(mId);
   if (!missionForLock) return res.status(404).json({ error: "Mission not found" });
   if ((await computeLscState(missionForLock)).completion.isGo) {
     return res.status(409).json({ error: "The Launch Status Check is already complete. No further changes are permitted." });

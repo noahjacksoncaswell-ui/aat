@@ -1,11 +1,18 @@
 import { Mission, MissionHold } from "@prisma/client";
 
-// v9.3 Section 3.3.3 - CCS Terminal Count Arm gate: opens at T-10:00, must
-// be actuated by T-3:00 or the scheduler force-inserts a hold that only
-// arming itself can release.
+// v9.3 Section 3.3.3 - CCS Terminal Count Arm gate: opens at T-10:00:00,
+// must be actuated by T-03:00:00 or the scheduler force-inserts a hold
+// that only arming itself can release. (v9.5 Section 0 - every T-minus
+// reference written to the second.)
 export const TERMINAL_COUNT_ARM_OPEN_SECONDS = 600;
 export const TERMINAL_COUNT_DEADLINE_SECONDS = 180;
 export const TERMINAL_COUNT_AUTO_HOLD_REASON = "TERMINAL COUNT NOT AUTHORIZED";
+
+// v9.4 Section 1 - LSC Verification Error Hold: fixed structural gate at
+// T-10:00:00, independent of any discretionary hold the Launch Director
+// may or may not have programmed for the Launch Status Check.
+export const LSC_ERROR_HOLD_GATE_SECONDS = 600;
+export const LSC_ERROR_HOLD_REASON = "LSC NOT VERIFIED BY T-10:00:00 — AWAITING LSC COMPLETION";
 
 /**
  * T-COUNT (Revision Directive v3.0 Section 6.2.1): the procedure-driven,
@@ -68,7 +75,12 @@ export function computeProjectedLiftoff(mission: Mission, holds: MissionHold[], 
     } else if (hold.status === "ACTIVE" && hold.actualStartedAt) {
       const elapsedSeconds = (now.getTime() - hold.actualStartedAt.getTime()) / 1000;
       const inOverage = hold.estimatedDurationSeconds != null && elapsedSeconds >= hold.estimatedDurationSeconds;
-      if (hold.type === "UNSCHEDULED" || inOverage) {
+      // v9.4 Section 1 - an ERROR hold (the LSC Verification Error Hold)
+      // has no pre-known duration either, exactly like an UNSCHEDULED
+      // hold - it must grow continuously in real elapsed time, not
+      // contribute a flat zero offset the way a PROGRAMMED hold with no
+      // estimate would.
+      if (hold.type === "UNSCHEDULED" || hold.type === "ERROR" || inOverage) {
         offsetSeconds += elapsedSeconds;
       } else {
         offsetSeconds += hold.estimatedDurationSeconds ?? 0;

@@ -81,6 +81,11 @@ export default function PersistentClockHeader({
 
   const activeHold = state?.activeHold ?? null;
   const unscheduledHoldActive = activeHold?.status === "ACTIVE" && activeHold.type === "UNSCHEDULED";
+  // v9.4 Section 1 - the LSC Verification Error Hold has no pre-known
+  // duration either, exactly like an unscheduled hold - matches the same
+  // continuous-growth treatment given to computeProjectedLiftoff server-
+  // side (services/countdown.ts).
+  const errorHoldActive = activeHold?.status === "ACTIVE" && activeHold.type === "ERROR";
   // v4.1 Item 4 - a PROGRAMMED hold whose estimated duration has elapsed
   // without being released is in overage: its estimate can no longer be
   // trusted, so from this point on the Launch Clock treats it exactly like
@@ -92,7 +97,7 @@ export default function PersistentClockHeader({
     !!activeHold.actualStartedAt &&
     activeHold.estimatedDurationSeconds != null &&
     (now.getTime() - new Date(activeHold.actualStartedAt).getTime()) / 1000 >= activeHold.estimatedDurationSeconds;
-  const openEndedHold = unscheduledHoldActive || programmedHoldOverage;
+  const openEndedHold = unscheduledHoldActive || errorHoldActive || programmedHoldOverage;
 
   // Between 8s polls, interpolate the server's projectedLiftoff forward by
   // elapsed client time while an unscheduled hold or a programmed-hold
@@ -119,6 +124,8 @@ export default function PersistentClockHeader({
     launchValue = abbreviated ? "LIFTOFF CONF." : "LIFTOFF CONFIRMED";
   } else if (unscheduledHoldActive) {
     launchValue = abbreviated ? "UNSCH. HOLD" : "UNSCHEDULED HOLD";
+  } else if (errorHoldActive) {
+    launchValue = "ERROR HOLD";
   } else if (programmedHoldOverage) {
     launchValue = abbreviated ? "HOLD ELAP." : "HOLD ELAPSED";
   } else {

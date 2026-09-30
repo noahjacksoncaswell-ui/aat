@@ -261,7 +261,7 @@ router.patch("/lot", requireLaunchDirector, async (req, res) => {
 
   const previousLot = mission.lot;
 
-  // v9.3 Section 3.3.3 - a revised LOT moves the T-3:00 deadline, so any
+  // v9.3 Section 3.3.3 - a revised LOT moves the T-03:00:00 deadline, so any
   // existing Terminal Count Arm/Transmit authorization no longer applies
   // and must be re-established fresh under the new LOT.
   await prisma.$transaction(async (tx) => {
@@ -340,6 +340,9 @@ router.patch("/holds/:holdId/auto-proceed", requireLaunchDirector, async (req, r
 
   const hold = await prisma.missionHold.findUnique({ where: { id: req.params.holdId } });
   if (!hold || hold.missionId !== missionId(req)) return res.status(404).json({ error: "Hold not found" });
+  // v9.4 Section 1.3 - the LSC Verification Error Hold carries no
+  // Auto-Proceed toggle at all; it is not a PROGRAMMED hold and its only
+  // release path is LSC's own completion event, never a duration timer.
   if (hold.type !== "PROGRAMMED") return res.status(400).json({ error: "Auto-Proceed only applies to programmed holds" });
   if (hold.status !== "ACTIVE") return res.status(400).json({ error: "Auto-Proceed can only be changed while the hold is active" });
 
@@ -420,6 +423,18 @@ router.post("/holds/:holdId/release", requireLaunchDirector, async (req, res) =>
         "This hold was raised by the CoFR compliance gate and cannot be released here. Confirm a Certification of Flight Readiness is now on file for the assigned vehicle, or execute Postpone Indefinitely.",
     });
   }
+  // v9.4 Section 1.3 - the LSC Verification Error Hold is genuinely
+  // unreleasable by any manual or administrative action, full stop -
+  // no Proceed Through Hold, no Auto-Proceed, no Admin Override
+  // exception. It clears only via its own condition-based auto-release
+  // (services/holdScheduler.ts, maybeAutoReleaseLscErrorHold) the instant
+  // the Launch Status Check actually completes.
+  if (hold.type === "ERROR") {
+    return res.status(400).json({
+      error:
+        "This is an LSC Verification Error Hold and cannot be released by any manual action. It clears automatically the instant the Launch Status Check completes.",
+    });
+  }
   // v9.3 Section 3.3.3 - the Terminal Count Not Authorized auto-hold is a
   // genuine gate, not merely informational: it cannot be released via
   // Proceed Through Hold alone. ARM TERMINAL COUNT must be actuated first.
@@ -427,7 +442,7 @@ router.post("/holds/:holdId/release", requireLaunchDirector, async (req, res) =>
     const gateMission = await prisma.mission.findUnique({ where: { id: mId }, select: { terminalCountArmedAt: true } });
     if (!gateMission?.terminalCountArmedAt) {
       return res.status(400).json({
-        error: "This hold was raised because Terminal Count was not authorized by T-3:00. ARM TERMINAL COUNT before this hold can be released.",
+        error: "This hold was raised because Terminal Count was not authorized by T-03:00:00. ARM TERMINAL COUNT before this hold can be released.",
       });
     }
   }
@@ -541,8 +556,8 @@ router.post("/liftoff", requireLaunchDirector, async (req, res) => {
 // v9.3 Section 3.3.3 - CCS TERMINAL COUNT ARM
 //
 // A final, deliberate human authorization gate distinct from and later than
-// LSC completion. ARM TERMINAL COUNT opens at T-10:00 and never closes on
-// its own; if it has not been actuated by T-3:00, the hold scheduler
+// LSC completion. ARM TERMINAL COUNT opens at T-10:00:00 and never closes on
+// its own; if it has not been actuated by T-03:00:00, the hold scheduler
 // (services/holdScheduler.ts, maybeRaiseTerminalCountGate) force-inserts an
 // unscheduled hold flagged isTerminalCountAutoHold, which the ordinary
 // Release Hold action refuses (see POST /holds/:holdId/release above) until
@@ -562,7 +577,7 @@ router.post("/terminal-count/arm", requireLaunchDirector, async (req, res) => {
   const activeHold = mission.holds.find((h) => h.status === "ACTIVE") ?? null;
   const currentTMinus = computeTCountSeconds(mission, activeHold);
   if (currentTMinus == null || currentTMinus > TERMINAL_COUNT_ARM_OPEN_SECONDS) {
-    return res.status(400).json({ error: "Terminal Count Arm window has not yet opened (opens at T-10:00)" });
+    return res.status(400).json({ error: "Terminal Count Arm window has not yet opened (opens at T-10:00:00)" });
   }
 
   await prisma.$transaction(async (tx) => {
@@ -604,7 +619,7 @@ router.post("/terminal-count/revoke", requireLaunchDirector, async (req, res) =>
     });
   });
 
-  // If the T-3:00 deadline has already passed, revoking is treated
+  // If the T-03:00:00 deadline has already passed, revoking is treated
   // identically to never having armed at all - the hold scheduler's next
   // tick (within ~1s) re-raises the same auto-hold, since it re-checks on
   // every tick and this mission is no longer armed.
