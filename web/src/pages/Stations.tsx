@@ -39,7 +39,7 @@ const RECIPIENTS: CommsRecipient[] = ["GENERAL", "LD", "LWO", "RC", "VSE"];
 
 // v9.0 Section 4.4.2 - "System" field reuses the existing VSE Polls-box
 // system list (Section 3.3 of v7.1); matches server/src/services/commsActions.ts.
-const COMMS_SYSTEM_OPTIONS = ["Propulsion", "Avionics", "Telemetry", "Staging", "Recovery", "Pad", "LCS", "LOIS"];
+const COMMS_SYSTEM_OPTIONS = ["Propulsion", "Avionics", "Telemetry", "Staging", "Recovery", "Pad", "VFS", "LOIS"];
 
 // v9.0 Section 4.5 - "role-filtered milestone ticker...tagged to user's own
 // station/role." MissionMilestone.responsibleStation is free text from the

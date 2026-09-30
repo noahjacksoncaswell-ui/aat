@@ -130,6 +130,10 @@ export const markLiftoff = (missionId: string, timestamp?: string) =>
 export const fetchLotCertification = (missionId: string) =>
   api.get<import("../types").LotCertification | null>(`/missions/${missionId}/countdown/lot/certification`).then((r) => r.data);
 export const confirmCofrGate = (missionId: string) => api.post(`/missions/${missionId}/countdown/cofr-gate/confirm`);
+// v9.3 Section 3.3.3 - CCS Terminal Count Arm
+export const armTerminalCount = (missionId: string) => api.post(`/missions/${missionId}/countdown/terminal-count/arm`);
+export const revokeTerminalCountArm = (missionId: string) => api.post(`/missions/${missionId}/countdown/terminal-count/revoke`);
+export const xmitCcsToVfs = (missionId: string) => api.post(`/missions/${missionId}/countdown/terminal-count/xmit`);
 export const fetchMilestoneTemplateOptions = (missionId: string) =>
   api.get<MilestoneTemplateOptions>(`/missions/${missionId}/countdown/milestones/templates`).then((r) => r.data);
 export const generateMilestoneSequence = (missionId: string, templateId?: string) =>

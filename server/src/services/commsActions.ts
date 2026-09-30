@@ -38,7 +38,7 @@ export interface CommsActionDef {
 
 // v9.0 Section 4.4.2 - "System" field reuses the existing VSE Polls-box
 // system list (Section 3.3 of v7.1), not a new list.
-export const COMMS_SYSTEM_OPTIONS = ["Propulsion", "Avionics", "Telemetry", "Staging", "Recovery", "Pad", "LCS", "LOIS"];
+export const COMMS_SYSTEM_OPTIONS = ["Propulsion", "Avionics", "Telemetry", "Staging", "Recovery", "Pad", "VFS", "LOIS"];
 
 const EFFECTIVE_TIME: CommsFieldDef = { id: "effectiveTime", label: "Effective Time", required: false };
 const DURATION: CommsFieldDef = { id: "duration", label: "Duration", required: false };

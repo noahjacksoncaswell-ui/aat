@@ -1,5 +1,12 @@
 import { Mission, MissionHold } from "@prisma/client";
 
+// v9.3 Section 3.3.3 - CCS Terminal Count Arm gate: opens at T-10:00, must
+// be actuated by T-3:00 or the scheduler force-inserts a hold that only
+// arming itself can release.
+export const TERMINAL_COUNT_ARM_OPEN_SECONDS = 600;
+export const TERMINAL_COUNT_DEADLINE_SECONDS = 180;
+export const TERMINAL_COUNT_AUTO_HOLD_REASON = "TERMINAL COUNT NOT AUTHORIZED";
+
 /**
  * T-COUNT (Revision Directive v3.0 Section 6.2.1): the procedure-driven,
  * hold-aware countdown to `lot`. While COUNTING it walks down in real time;

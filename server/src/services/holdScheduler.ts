@@ -1,7 +1,7 @@
 import { Mission, MissionHold, MissionHistoryEventType } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { broadcastMissionUpdate } from "../websocket";
-import { computeTCountSeconds } from "./countdown";
+import { computeTCountSeconds, TERMINAL_COUNT_DEADLINE_SECONDS, TERMINAL_COUNT_AUTO_HOLD_REASON } from "./countdown";
 import { COFR_DOCUMENT_CATEGORY } from "./lotCertification";
 
 /**
@@ -115,18 +115,18 @@ async function maybeAutoReleaseHold(mission: MissionWithHolds): Promise<void> {
  * assumes; it re-checks on every subsequent tick, so the gate still fires
  * the instant that hold clears if the deadline has already passed.
  */
-async function maybeRaiseCofrComplianceGate(mission: MissionWithHolds): Promise<void> {
-  if (mission.holds.some((h) => h.status === "ACTIVE")) return;
+async function maybeRaiseCofrComplianceGate(mission: MissionWithHolds): Promise<boolean> {
+  if (mission.holds.some((h) => h.status === "ACTIVE")) return false;
 
   const latestCert = await prisma.lotCertification.findFirst({
     where: { missionId: mission.id, cofrBasis: "WILL_FILE_WITHIN_24H", cofrGateResolvedAt: null },
     orderBy: { signedAt: "desc" },
   });
-  if (!latestCert?.cofrComplianceDeadline) return;
-  if (Date.now() < latestCert.cofrComplianceDeadline.getTime()) return;
+  if (!latestCert?.cofrComplianceDeadline) return false;
+  if (Date.now() < latestCert.cofrComplianceDeadline.getTime()) return false;
 
   const cofrDoc = await prisma.document.findFirst({ where: { category: COFR_DOCUMENT_CATEGORY, vehicleId: mission.vehicleId } });
-  if (cofrDoc) return; // resolved organically; LD still confirms via cofr-gate/confirm to clear the record
+  if (cofrDoc) return false; // resolved organically; LD still confirms via cofr-gate/confirm to clear the record
 
   const currentTMinus = computeTCountSeconds(mission, null) ?? 0;
   const reason =
@@ -156,6 +156,53 @@ async function maybeRaiseCofrComplianceGate(mission: MissionWithHolds): Promise<
     });
   });
   broadcastMissionUpdate(mission.id);
+  return true;
+}
+
+/**
+ * v9.3 Section 3.3.3 - CCS Terminal Count Arm gate. ARM TERMINAL COUNT must
+ * be actuated by T-3:00; if the mission reaches that mark still unarmed,
+ * this force-inserts an unscheduled hold flagged `isTerminalCountAutoHold`
+ * so it cannot be cleared by the ordinary Release Hold action - only by
+ * arming (which POST /terminal-count/arm allows regardless of whether this
+ * auto-hold is already active, unlocking Proceed Through Hold for it).
+ *
+ * Mirrors maybeRaiseCofrComplianceGate's shape: no-ops while another hold
+ * is already ACTIVE (single-active-hold invariant) and no-ops once armed,
+ * so revoking after the deadline (which clears terminalCountArmedAt) is
+ * picked back up on the very next tick and re-raises the same auto-hold -
+ * the deadline cannot be escaped by arming, revoking, and not re-arming.
+ */
+async function maybeRaiseTerminalCountGate(mission: MissionWithHolds): Promise<void> {
+  if (mission.holds.some((h) => h.status === "ACTIVE")) return;
+  if (mission.terminalCountArmedAt) return;
+
+  const currentTMinus = computeTCountSeconds(mission, null);
+  if (currentTMinus == null || currentTMinus > TERMINAL_COUNT_DEADLINE_SECONDS) return;
+
+  await prisma.$transaction(async (tx) => {
+    const hold = await tx.missionHold.create({
+      data: {
+        missionId: mission.id,
+        type: "UNSCHEDULED",
+        holdMarkSeconds: Math.round(currentTMinus),
+        status: "ACTIVE",
+        actualStartedAt: new Date(),
+        isTerminalCountAutoHold: true,
+        reason: TERMINAL_COUNT_AUTO_HOLD_REASON,
+      },
+    });
+    await tx.mission.update({ where: { id: mission.id }, data: { tCountStatus: "HOLDING" } });
+    await tx.missionHistoryEvent.create({
+      data: {
+        missionId: mission.id,
+        eventType: MissionHistoryEventType.TERMINAL_COUNT_AUTO_HOLD,
+        notes: `${TERMINAL_COUNT_AUTO_HOLD_REASON} - hold forced at T-${Math.round(currentTMinus)}s`,
+        metadata: { holdId: hold.id },
+      },
+    });
+  });
+  broadcastMissionUpdate(mission.id);
 }
 
 async function tick(): Promise<void> {
@@ -168,7 +215,10 @@ async function tick(): Promise<void> {
     try {
       if (mission.tCountStatus === "COUNTING") {
         const holdTriggered = await triggerNextScheduledHold(mission);
-        if (!holdTriggered) await maybeRaiseCofrComplianceGate(mission);
+        if (!holdTriggered) {
+          const cofrGateRaised = await maybeRaiseCofrComplianceGate(mission);
+          if (!cofrGateRaised) await maybeRaiseTerminalCountGate(mission);
+        }
       } else if (mission.tCountStatus === "HOLDING") {
         await maybeAutoReleaseHold(mission);
       }

@@ -65,6 +65,11 @@ enum MissionHistoryEventType {
   NOTE
   COFR_COMPLIANCE_LAPSED
   COFR_COMPLIANCE_RESOLVED
+  // v9.3 Section 3.3.3 - Terminal Count Arm gate events.
+  TERMINAL_COUNT_ARMED
+  TERMINAL_COUNT_REVOKED
+  TERMINAL_COUNT_AUTO_HOLD
+  XMIT_CCS_TO_VFS
 }
 
 // v5.0 Section 7.4 - basis for LOT Submission certification checkbox 8. Set
@@ -206,6 +211,10 @@ model User {
   // v9.0 Section 4.4 - Formal Role Communications
   commsMessagesSent     FormalCommsMessage[] @relation("CommsSender")
   commsMessagesResolved FormalCommsMessage[] @relation("CommsResolvedBy")
+
+  // v9.3 Section 3.3.3 - Terminal Count Arm
+  terminalCountArmsMade  Mission[] @relation("TerminalCountArmedBy")
+  terminalCountXmitsMade Mission[] @relation("TerminalCountXmitBy")
 
   @@index([role])
 }
@@ -466,6 +475,19 @@ model Mission {
   launchCountTimeConfirmedById  String?
   launchCountTimeConfirmedBy    User?     @relation("LaunchCountTimeConfirmedBy", fields: [launchCountTimeConfirmedById], references: [id])
 
+  // v9.3 Section 3.3.3 - Terminal Count Arm: a final, deliberate human
+  // authorization gate distinct from and later than LSC completion.
+  // Available starting T-10:00, must be actuated by T-3:00 or the hold
+  // scheduler auto-inserts a hold (see MissionHold.isTerminalCountAutoHold
+  // below and server/src/services/holdScheduler.ts). REVOKE ARM clears
+  // both this and the XMIT fields together, since XMIT depends on ARM.
+  terminalCountArmedAt   DateTime?
+  terminalCountArmedById String?
+  terminalCountArmedBy   User?     @relation("TerminalCountArmedBy", fields: [terminalCountArmedById], references: [id])
+  terminalCountXmitAt    DateTime?
+  terminalCountXmitById  String?
+  terminalCountXmitBy    User?     @relation("TerminalCountXmitBy", fields: [terminalCountXmitById], references: [id])
+
   launchPeriodEntries    LaunchPeriodEntry[]
   historyEvents          MissionHistoryEvent[]
   disposition            MissionDisposition?
@@ -522,6 +544,13 @@ model MissionHold {
   // cleared via the normal Release Hold action - only by confirming a CoFR
   // document now exists (POST .../cofr-gate/confirm) or Postpone Indefinitely.
   isCofrComplianceHold     Boolean    @default(false)
+  // v9.3 Section 3.3.3 - true only for the system-triggered unscheduled
+  // hold auto-inserted when the T-3:00 Terminal Count Arm deadline passes
+  // unauthorized. Mirrors isCofrComplianceHold's gating pattern, but the
+  // release mechanism differs: this hold IS releasable via the normal
+  // Proceed Through Hold action, just not until ARM TERMINAL COUNT has
+  // since been actuated (checked in POST .../holds/:holdId/release).
+  isTerminalCountAutoHold  Boolean    @default(false)
   reason                   String?
   actualStartedAt          DateTime?
   actualEndedAt            DateTime?

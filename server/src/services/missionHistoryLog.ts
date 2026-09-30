@@ -46,6 +46,10 @@ const MISSION_HISTORY_LABELS: Record<string, string> = {
   NOTE: "Note",
   COFR_COMPLIANCE_LAPSED: "CoFR Compliance Lapsed",
   COFR_COMPLIANCE_RESOLVED: "CoFR Compliance Resolved",
+  TERMINAL_COUNT_ARMED: "Terminal Count Armed",
+  TERMINAL_COUNT_REVOKED: "Terminal Count Arm Revoked",
+  TERMINAL_COUNT_AUTO_HOLD: "Terminal Count Not Authorized - Hold Forced",
+  XMIT_CCS_TO_VFS: "CCS Transmitted to VFS",
 };
 
 // v9.2 Section 6.3 - these MissionHistoryEventTypes are countdown/clock
@@ -56,7 +60,17 @@ const MISSION_HISTORY_LABELS: Record<string, string> = {
 // list names these by their UI action label (Select New LOT/Recycle-to-
 // Mark/Mark Liftoff/hold opened-released) rather than their internal
 // MissionHistoryEventType constant names.
-const CCS_HISTORY_EVENT_TYPES = new Set(["LOT_REVISED", "HOLD_CALLED", "HOLD_RELEASED", "RECYCLED", "LIFTOFF_MARKED"]);
+const CCS_HISTORY_EVENT_TYPES = new Set([
+  "LOT_REVISED",
+  "HOLD_CALLED",
+  "HOLD_RELEASED",
+  "RECYCLED",
+  "LIFTOFF_MARKED",
+  "TERMINAL_COUNT_ARMED",
+  "TERMINAL_COUNT_REVOKED",
+  "TERMINAL_COUNT_AUTO_HOLD",
+  "XMIT_CCS_TO_VFS",
+]);
 
 // v9.0 Section 3.2 - LWCC hold recommendations: the v5.3 Recommendation
 // Panel text is purely client-side computed each render and never

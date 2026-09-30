@@ -40,7 +40,11 @@ import { buildMissionLogPdf, missionLogFileName } from "../lib/missionHistory/mi
 
 // v9.0 Section 1A - "Countdown" renamed to "CCS" (Countdown Control
 // Sequencer), label only - no functional change.
-const TABS = ["Overview", "CCS", "Polls", "FAA & NOTAM", "Log", "History", "LWCC"] as const;
+// v9.3 Section 1 - "Overview" renamed to "Lifecycle", for naming
+// consistency with the [LIFECYCLE] Unified Log category (v9.2 Section 6.1),
+// which already covers the same conceptual territory. Label only - the
+// underlying OverviewTab component and its content are unchanged.
+const TABS = ["Lifecycle", "CCS", "Polls", "FAA & NOTAM", "Log", "History", "LWCC"] as const;
 
 export default function MissionDetail() {
   const { missionId } = useParams<{ missionId: string }>();
@@ -49,10 +53,10 @@ export default function MissionDetail() {
   const { useZulu } = usePreferences();
   const qc = useQueryClient();
   // v9.0 Section 4.5 - the Stations page's "quick link to your own working
-  // tab" deep-links here via ?tab=; falls back to Overview for any other
+  // tab" deep-links here via ?tab=; falls back to Lifecycle for any other
   // entry point or an unrecognized value.
   const requestedTab = searchParams.get("tab");
-  const initialTab = (TABS as readonly string[]).includes(requestedTab ?? "") ? (requestedTab as (typeof TABS)[number]) : "Overview";
+  const initialTab = (TABS as readonly string[]).includes(requestedTab ?? "") ? (requestedTab as (typeof TABS)[number]) : "Lifecycle";
   const [tab, setTab] = useState<(typeof TABS)[number]>(initialTab);
   const [scrubModalOpen, setScrubModalOpen] = useState(false);
 
@@ -123,21 +127,30 @@ export default function MissionDetail() {
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${
-              tab === t
-                ? "border-aat-accent text-aat-accent"
-                : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+            className={`-mb-px px-4 py-2 text-sm font-medium ${
+              // v9.3 Section 1 - CCS is "the brains of a launch," the single
+              // most operationally critical tab, so it carries its own
+              // full-perimeter orange accent border (the same convention
+              // reserved for Test Clock/Launch Clock, v4.1 Section 3)
+              // rather than just the other tabs' bottom-border-only accent.
+              t === "CCS"
+                ? `border-2 border-aat-caution ${tab === t ? "bg-aat-caution/10 text-aat-caution" : "text-aat-caution/80 hover:bg-aat-caution/5"}`
+                : `border-b-2 ${
+                    tab === t
+                      ? "border-aat-accent text-aat-accent"
+                      : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                  }`
             }`}
           >
-            {t}
+            {t === "CCS" ? "*** CCS ***" : t}
           </button>
         ))}
       </div>
 
-      {tab === "Overview" &&
+      {tab === "Lifecycle" &&
         (cancelled ? (
           <div className="space-y-6">
-            <LockdownNotice tabName="Overview" cancelledAt={cancelledAt} useZulu={useZulu} />
+            <LockdownNotice tabName="Lifecycle" cancelledAt={cancelledAt} useZulu={useZulu} />
             <section className="card max-w-md p-5">
               <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Launch Director Actions</div>
               <ActionButtons mission={mission} missionId={missionId!} onRequestScrub={() => setScrubModalOpen(true)} onRemoved={() => navigate("/missions")} />
@@ -457,8 +470,8 @@ function ScrubModal({ missionId, onClose }: { missionId: string; onClose: () => 
           <h2 className="mb-2 text-lg font-bold">Mission Scrubbed</h2>
           <p className="mb-4 text-sm">
             {result.remainingOpportunities > 0
-              ? `${result.remainingOpportunities} launch opportunity(ies) remain in this mission's Launch Period. Select a new target from the Overview tab, or Postpone Indefinitely if none are viable.`
-              : "No remaining launch opportunities in this mission's Launch Period. Postpone Indefinitely from the Overview tab, or add new windows first."}
+              ? `${result.remainingOpportunities} launch opportunity(ies) remain in this mission's Launch Period. Select a new target from the Lifecycle tab, or Postpone Indefinitely if none are viable.`
+              : "No remaining launch opportunities in this mission's Launch Period. Postpone Indefinitely from the Lifecycle tab, or add new windows first."}
           </p>
           <div className="flex justify-end">
             <button onClick={onClose} className="btn-primary">

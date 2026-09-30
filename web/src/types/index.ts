@@ -294,6 +294,10 @@ export interface MissionHold {
   // v5.0 Section 7.4 - true only for the system-triggered hold raised when
   // a LOT Certification's 24-hour CoFR compliance deadline lapses.
   isCofrComplianceHold?: boolean;
+  // v9.3 Section 3.3.3 - true only for the system-triggered hold raised
+  // when ARM TERMINAL COUNT was not actuated by T-3:00. Cannot be released
+  // via the ordinary Proceed Through Hold action until armed.
+  isTerminalCountAutoHold?: boolean;
   reason?: string | null;
   actualStartedAt?: string | null;
   actualEndedAt?: string | null;
@@ -329,6 +333,11 @@ export interface CountdownState {
   projectedLiftoff: string | null;
   activeHold: MissionHold | null;
   holds: MissionHold[];
+  // v9.3 Section 3.3.3 - CCS Terminal Count Arm state.
+  terminalCountArmedAt?: string | null;
+  terminalCountArmedBy?: { id: string; name: string } | null;
+  terminalCountXmitAt?: string | null;
+  terminalCountXmitBy?: { id: string; name: string } | null;
 }
 
 export interface Mission {

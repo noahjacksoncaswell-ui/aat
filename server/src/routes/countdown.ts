@@ -6,7 +6,7 @@ import { requireLaunchDirector, requireRole } from "../middleware/auth";
 import { Role } from "@prisma/client";
 import { recordAudit } from "../services/audit";
 import { broadcastMissionUpdate } from "../websocket";
-import { computeTCountSeconds, computeProjectedLiftoff } from "../services/countdown";
+import { computeTCountSeconds, computeProjectedLiftoff, TERMINAL_COUNT_ARM_OPEN_SECONDS } from "../services/countdown";
 import { COUNTDOWN_MILESTONE_SEQUENCE } from "../services/countdownSequence";
 import { computeCoaStatus } from "../services/faa";
 import {
@@ -27,7 +27,12 @@ function missionId(req: any): string {
 async function loadMissionWithHolds(mId: string) {
   return prisma.mission.findUnique({
     where: { id: mId },
-    include: { launchPeriodEntries: true, holds: { orderBy: { holdMarkSeconds: "desc" } } },
+    include: {
+      launchPeriodEntries: true,
+      holds: { orderBy: { holdMarkSeconds: "desc" } },
+      terminalCountArmedBy: { select: { id: true, name: true } },
+      terminalCountXmitBy: { select: { id: true, name: true } },
+    },
   });
 }
 
@@ -53,6 +58,10 @@ router.get("/state", async (req, res) => {
     projectedLiftoff,
     activeHold,
     holds: mission.holds,
+    terminalCountArmedAt: mission.terminalCountArmedAt,
+    terminalCountArmedBy: mission.terminalCountArmedBy,
+    terminalCountXmitAt: mission.terminalCountXmitAt,
+    terminalCountXmitBy: mission.terminalCountXmitBy,
   });
 });
 
@@ -252,8 +261,14 @@ router.patch("/lot", requireLaunchDirector, async (req, res) => {
 
   const previousLot = mission.lot;
 
+  // v9.3 Section 3.3.3 - a revised LOT moves the T-3:00 deadline, so any
+  // existing Terminal Count Arm/Transmit authorization no longer applies
+  // and must be re-established fresh under the new LOT.
   await prisma.$transaction(async (tx) => {
-    await tx.mission.update({ where: { id: mission.id }, data: { lot } });
+    await tx.mission.update({
+      where: { id: mission.id },
+      data: { lot, terminalCountArmedAt: null, terminalCountArmedById: null, terminalCountXmitAt: null, terminalCountXmitById: null },
+    });
     await tx.missionHistoryEvent.create({
       data: {
         missionId: mission.id,
@@ -405,6 +420,17 @@ router.post("/holds/:holdId/release", requireLaunchDirector, async (req, res) =>
         "This hold was raised by the CoFR compliance gate and cannot be released here. Confirm a Certification of Flight Readiness is now on file for the assigned vehicle, or execute Postpone Indefinitely.",
     });
   }
+  // v9.3 Section 3.3.3 - the Terminal Count Not Authorized auto-hold is a
+  // genuine gate, not merely informational: it cannot be released via
+  // Proceed Through Hold alone. ARM TERMINAL COUNT must be actuated first.
+  if (hold.isTerminalCountAutoHold) {
+    const gateMission = await prisma.mission.findUnique({ where: { id: mId }, select: { terminalCountArmedAt: true } });
+    if (!gateMission?.terminalCountArmedAt) {
+      return res.status(400).json({
+        error: "This hold was raised because Terminal Count was not authorized by T-3:00. ARM TERMINAL COUNT before this hold can be released.",
+      });
+    }
+  }
 
   const actualDurationSeconds = Math.round((Date.now() - hold.actualStartedAt.getTime()) / 1000);
 
@@ -507,6 +533,106 @@ router.post("/liftoff", requireLaunchDirector, async (req, res) => {
   });
 
   await recordAudit({ userId: req.user!.id, action: "LIFTOFF_MARKED", targetType: "Mission", targetId: mId, metadata: { liftoffActualTime } });
+  broadcastMissionUpdate(mId);
+  res.status(204).send();
+});
+
+// ---------------------------------------------------------------------------
+// v9.3 Section 3.3.3 - CCS TERMINAL COUNT ARM
+//
+// A final, deliberate human authorization gate distinct from and later than
+// LSC completion. ARM TERMINAL COUNT opens at T-10:00 and never closes on
+// its own; if it has not been actuated by T-3:00, the hold scheduler
+// (services/holdScheduler.ts, maybeRaiseTerminalCountGate) force-inserts an
+// unscheduled hold flagged isTerminalCountAutoHold, which the ordinary
+// Release Hold action refuses (see POST /holds/:holdId/release above) until
+// ARM TERMINAL COUNT is actuated. XMIT CCS TO VFS is a logged confirmation
+// step only today (this application commands no real firing hardware) but
+// is built and gated exactly as if it will carry real interlock weight in
+// a future revision.
+// ---------------------------------------------------------------------------
+
+router.post("/terminal-count/arm", requireLaunchDirector, async (req, res) => {
+  const mId = missionId(req);
+  const mission = await loadMissionWithHolds(mId);
+  if (!mission) return res.status(404).json({ error: "Mission not found" });
+  if (!mission.lot) return res.status(400).json({ error: "Test Clock is not established" });
+  if (mission.terminalCountArmedAt) return res.status(400).json({ error: "Terminal Count is already armed" });
+
+  const activeHold = mission.holds.find((h) => h.status === "ACTIVE") ?? null;
+  const currentTMinus = computeTCountSeconds(mission, activeHold);
+  if (currentTMinus == null || currentTMinus > TERMINAL_COUNT_ARM_OPEN_SECONDS) {
+    return res.status(400).json({ error: "Terminal Count Arm window has not yet opened (opens at T-10:00)" });
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.mission.update({ where: { id: mId }, data: { terminalCountArmedAt: new Date(), terminalCountArmedById: req.user!.id } });
+    await tx.missionHistoryEvent.create({
+      data: {
+        missionId: mId,
+        eventType: MissionHistoryEventType.TERMINAL_COUNT_ARMED,
+        actorId: req.user!.id,
+        notes: "Terminal Count Arm authorized",
+      },
+    });
+  });
+
+  await recordAudit({ userId: req.user!.id, action: "TERMINAL_COUNT_ARMED", targetType: "Mission", targetId: mId });
+  broadcastMissionUpdate(mId);
+  res.status(204).send();
+});
+
+router.post("/terminal-count/revoke", requireLaunchDirector, async (req, res) => {
+  const mId = missionId(req);
+  const mission = await prisma.mission.findUnique({ where: { id: mId } });
+  if (!mission) return res.status(404).json({ error: "Mission not found" });
+  if (!mission.terminalCountArmedAt) return res.status(400).json({ error: "Terminal Count is not currently armed" });
+
+  // XMIT logically depends on ARM, so revoking clears both together.
+  await prisma.$transaction(async (tx) => {
+    await tx.mission.update({
+      where: { id: mId },
+      data: { terminalCountArmedAt: null, terminalCountArmedById: null, terminalCountXmitAt: null, terminalCountXmitById: null },
+    });
+    await tx.missionHistoryEvent.create({
+      data: {
+        missionId: mId,
+        eventType: MissionHistoryEventType.TERMINAL_COUNT_REVOKED,
+        actorId: req.user!.id,
+        notes: "Terminal Count Arm revoked" + (mission.terminalCountXmitAt ? " (XMIT CCS TO VFS revoked with it)" : ""),
+      },
+    });
+  });
+
+  // If the T-3:00 deadline has already passed, revoking is treated
+  // identically to never having armed at all - the hold scheduler's next
+  // tick (within ~1s) re-raises the same auto-hold, since it re-checks on
+  // every tick and this mission is no longer armed.
+  await recordAudit({ userId: req.user!.id, action: "TERMINAL_COUNT_REVOKED", targetType: "Mission", targetId: mId });
+  broadcastMissionUpdate(mId);
+  res.status(204).send();
+});
+
+router.post("/terminal-count/xmit", requireLaunchDirector, async (req, res) => {
+  const mId = missionId(req);
+  const mission = await prisma.mission.findUnique({ where: { id: mId } });
+  if (!mission) return res.status(404).json({ error: "Mission not found" });
+  if (!mission.terminalCountArmedAt) return res.status(400).json({ error: "Terminal Count is not armed" });
+  if (mission.terminalCountXmitAt) return res.status(400).json({ error: "CCS has already been transmitted to VFS" });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.mission.update({ where: { id: mId }, data: { terminalCountXmitAt: new Date(), terminalCountXmitById: req.user!.id } });
+    await tx.missionHistoryEvent.create({
+      data: {
+        missionId: mId,
+        eventType: MissionHistoryEventType.XMIT_CCS_TO_VFS,
+        actorId: req.user!.id,
+        notes: "CCS transmitted to VFS (Vehicle Firing Sequencer) - logged confirmation only; no real firing hardware commanded",
+      },
+    });
+  });
+
+  await recordAudit({ userId: req.user!.id, action: "XMIT_CCS_TO_VFS", targetType: "Mission", targetId: mId });
   broadcastMissionUpdate(mId);
   res.status(204).send();
 });

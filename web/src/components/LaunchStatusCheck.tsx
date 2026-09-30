@@ -390,7 +390,7 @@ export function CompletionBanner({ check, useZulu, large }: { check: LaunchStatu
   if (check.completion.isGo && check.completion.completedAt) {
     return (
       <div className={`card border-2 border-aat-go bg-aat-go/10 p-4 text-center font-bold uppercase tracking-wide text-aat-go ${textSize}`}>
-        LAUNCH STATUS CHECK: GO — LSC COMPLETED AT {formatTimestamp(check.completion.completedAt, useZulu)} — PROCEEDING WITH TERMINAL COUNT UPON
+        LAUNCH STATUS CHECK: GO — LSC COMPLETED AT {formatTimestamp(check.completion.completedAt, useZulu)} — PROCEEDING WITH COUNT UPON
         PROGRAMMED LSC HOLD RELEASE
       </div>
     );
@@ -555,7 +555,7 @@ export function LaunchStatusCheckBoard({
     "VSE_STAGING",
     "VSE_RECOVERY",
     "VSE_PAD",
-    "VSE_LCS",
+    "VSE_VFS",
     "VSE_LOIS",
     "LWO_WEATHER",
     "RC_COMMUNICATIONS",
@@ -596,7 +596,7 @@ export function LaunchStatusCheckBoard({
             <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Vehicle Systems</div>
             {["VSE_PROPULSION", "VSE_AVIONICS", "VSE_TELEMETRY", "VSE_STAGING", "VSE_RECOVERY"].map((key) => row(key, vse, STANDARD_OPTIONS, "GO"))}
             <div className="mb-1 mt-3 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Ground Systems</div>
-            {["VSE_PAD", "VSE_LCS", "VSE_LOIS"].map((key) => row(key, vse, STANDARD_OPTIONS, "GO"))}
+            {["VSE_PAD", "VSE_VFS", "VSE_LOIS"].map((key) => row(key, vse, STANDARD_OPTIONS, "GO"))}
           </RoleBoxShell>
 
           <RoleBoxShell
