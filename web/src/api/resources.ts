@@ -26,6 +26,10 @@ import type {
   UserRecord,
   Vehicle,
   WeatherSnapshot,
+  UnifiedLogResponse,
+  CommsActionsResponse,
+  CommsRecipient,
+  FormalCommsMessage,
 } from "../types";
 
 // Dashboard
@@ -242,6 +246,19 @@ export const removePersonnelAssignment = (missionId: string, assignmentId: strin
   api.delete(`/missions/${missionId}/personnel/${assignmentId}`);
 export const toggleOnStation = (missionId: string, assignmentId: string, onStation: boolean) =>
   api.post<MissionPersonnelAssignmentRecord>(`/missions/${missionId}/personnel/${assignmentId}/station`, { onStation }).then((r) => r.data);
+
+// v9.0 Section 3 - Unified Mission Command Log
+export const fetchMissionHistoryLog = (missionId: string) =>
+  api.get<UnifiedLogResponse>(`/missions/${missionId}/history-log`).then((r) => r.data);
+
+// v9.0 Section 4.4 - Formal Role Communications
+export const fetchMissionComms = (missionId: string) => api.get<FormalCommsMessage[]>(`/missions/${missionId}/comms`).then((r) => r.data);
+export const fetchMissionCommsActions = (missionId: string) =>
+  api.get<CommsActionsResponse>(`/missions/${missionId}/comms/actions`).then((r) => r.data);
+export const sendMissionComms = (
+  missionId: string,
+  data: { recipient: CommsRecipient; actionCode: string; fields?: Record<string, unknown>; detail?: string }
+) => api.post<FormalCommsMessage>(`/missions/${missionId}/comms`, data).then((r) => r.data);
 export const setOffStationOverride = (missionId: string, assignmentId: string, reason: string) =>
   api.post<MissionPersonnelAssignmentRecord>(`/missions/${missionId}/personnel/${assignmentId}/override`, { reason }).then((r) => r.data);
 export const clearOffStationOverride = (missionId: string, assignmentId: string) =>

@@ -50,6 +50,18 @@ export function initWebsocket(httpServer: HttpServer) {
     });
     socket.join("dashboard");
 
+    // v9.0 Section 4.5 - "Comms presence indicator": a lightweight,
+    // purely relayed (never persisted) broadcast of who currently has the
+    // Stations page open for a given mission - distinct from the
+    // onlineConnectionCounts-backed physical ON STATION status above. The
+    // client re-emits this every ~15s while the page is open and prunes
+    // stale entries locally, so no server-side bookkeeping is needed here.
+    socket.on("stations:present", (payload: { missionId: string; userName: string }) => {
+      if (!userId || !payload?.missionId) return;
+      socket.join(`stations:${payload.missionId}`);
+      io?.to(`stations:${payload.missionId}`).emit("stations:presence", { userId, userName: payload.userName, at: Date.now() });
+    });
+
     socket.on("disconnect", () => {
       if (!userId) return;
       const next = (onlineConnectionCounts.get(userId) ?? 1) - 1;

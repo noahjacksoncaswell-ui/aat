@@ -514,6 +514,11 @@ export const TRAJECTORY_SIMULATION_REPORT_CATEGORY = "Trajectory Simulation Repo
 // already-existing category (no new category is introduced).
 export const METOC_MEF_CATEGORY = "Mission Execution Forecast (Weather)";
 
+// v9.0 Section 3.4 - the Unified Mission Command Log's Export/Print button
+// archives to this new category, following the same auto-archival pattern
+// as Trajectory Simulation Reports and Unofficial MEF documents above.
+export const MISSION_COMMAND_LOG_CATEGORY = "Mission Command Log";
+
 export const DOCUMENT_CATEGORIES = [
   "Mission Operations Plan (MOP)",
   "Certification of Mission Readiness (CoMR)",
@@ -524,6 +529,7 @@ export const DOCUMENT_CATEGORIES = [
   "Launch Countdown Procedure",
   METOC_MEF_CATEGORY,
   TRAJECTORY_SIMULATION_REPORT_CATEGORY,
+  MISSION_COMMAND_LOG_CATEGORY,
   "Other",
 ];
 
@@ -845,4 +851,65 @@ export interface MetocMefResponse {
   };
   forecastDiscussion: string;
   days: MetocMefDay[];
+}
+
+// ---------------------------------------------------------------------------
+// v9.0 - Unified Mission Command Log + Formal Role Communications
+// ---------------------------------------------------------------------------
+
+export type LogStatus = "PENDING" | "IN PROGRESS" | "CLOSED";
+
+export type UnifiedLogSource = "MISSION_LIFECYCLE" | "LAUNCH_PERIOD" | "LWCC" | "HOLD" | "FAA_NOTAM" | "PERSONNEL" | "POLLS" | "MANUAL_LOG" | "COMMS";
+
+export interface UnifiedLogEntry {
+  timestamp: string;
+  source: UnifiedLogSource;
+  text: string;
+  actorName: string | null;
+}
+
+export interface UnifiedLogResponse {
+  logStatus: LogStatus;
+  tCountSeconds: number | null;
+  projectedLiftoff: string | null;
+  entries: UnifiedLogEntry[];
+}
+
+export type CommsRecipient = "GENERAL" | "LD" | "LWO" | "RC" | "VSE";
+
+export interface CommsFieldDef {
+  id: string;
+  label: string;
+  required: boolean;
+  statusOptions?: string[];
+}
+
+export interface CommsActionDef {
+  code: string;
+  label: string;
+  fields: CommsFieldDef[];
+  recipientLockedToLd?: boolean;
+}
+
+export interface CommsActionsResponse {
+  role: MissionRole | null;
+  actions: CommsActionDef[];
+}
+
+export interface FormalCommsMessage {
+  id: string;
+  missionId: string;
+  senderId: string;
+  senderName: string;
+  senderRole: MissionRole;
+  recipient: CommsRecipient;
+  actionCode: string;
+  fields: Record<string, unknown> | null;
+  detail: string | null;
+  resolvedAt: string | null;
+  resolvedById: string | null;
+  resolvedByName: string | null;
+  resolutionCode: string | null;
+  timestamp: string;
+  line: string;
 }

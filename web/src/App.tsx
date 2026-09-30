@@ -16,6 +16,7 @@ import RangeOps from "./pages/RangeOps";
 import TrajectorySim from "./pages/TrajectorySim";
 import PersonnelStations from "./pages/PersonnelStations";
 import Metoc from "./pages/Metoc";
+import Stations from "./pages/Stations";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -54,6 +55,7 @@ export default function App() {
         <Route path="/metoc" element={<Metoc />} />
         <Route path="/trajectory-sim" element={<TrajectorySim />} />
         <Route path="/personnel" element={<PersonnelStations />} />
+        <Route path="/stations" element={<Stations />} />
         <Route path="/admin" element={<Admin />} />
       </Route>
       {/* v5.1 Section 3 - outside the Layout-wrapped group deliberately: the

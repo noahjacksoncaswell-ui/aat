@@ -174,7 +174,7 @@ export default function RangeOps() {
               <section className="card border-2 border-aat-caution bg-aat-caution/10 p-3">
                 {/* v5.4 Section 2 - sized to match the LWCC banner below
                     (text-xl header, text-base body) on this page only; the
-                    Countdown tab's own hold banner is untouched. */}
+                    CCS tab's own hold banner is untouched. */}
                 <div className="text-base">
                   <strong>ACTIVE HOLD</strong> at T-{secondsToHms(activeHold.holdMarkSeconds)} — {activeHold.type}
                   {activeHold.reason ? ` — ${activeHold.reason}` : ""}

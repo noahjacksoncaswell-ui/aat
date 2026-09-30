@@ -10,6 +10,7 @@ import {
   fetchDocuments,
   fetchLwccState,
   fetchMilestoneTemplateOptions,
+  fetchMissionComms,
   generateMilestoneSequence,
   markLiftoff,
   recycleCountdown,
@@ -260,6 +261,17 @@ function HoldManagement({
   const [newHold, setNewHold] = useState({ holdMark: "00:30:00", duration: "00:15:00", reason: "" });
   const [callReason, setCallReason] = useState("");
   const [showCall, setShowCall] = useState(false);
+
+  // v9.0 Section 5 - REC HOLD/REC TERM escalation banner data. Polled
+  // (rather than socket-invalidated) since formal comms is not otherwise
+  // wired into this tab's existing mission-socket subscription.
+  const { data: commsMessages } = useQuery({
+    queryKey: ["mission-comms", mission.id],
+    queryFn: () => fetchMissionComms(mission.id),
+    refetchInterval: 10_000,
+  });
+  const outstandingRecHold = (commsMessages ?? []).filter((m) => m.actionCode === "REC HOLD" && !m.resolvedAt);
+  const outstandingRecTerm = (commsMessages ?? []).filter((m) => m.actionCode === "REC TERM" && !m.resolvedAt);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["countdown", mission.id] });
@@ -533,6 +545,35 @@ function HoldManagement({
           </div>
         )}
       </div>
+
+      {/* v9.0 Section 5 - formal comms REC HOLD/REC TERM escalation banner.
+          Same placement/visual treatment as the LWCC Recommendation panel
+          directly above (Section 5.3), but every outstanding recommendation
+          is shown as its own full stacked line (Section 5.3: NOT
+          collapsed/summarized like the LWCC panel's longest-remaining
+          logic) - each with its full compact message text and timestamp.
+          Only REC HOLD/REC TERM escalate (Section 5.2); every other comms
+          action stays in the Stations live feed and Unified Log only. A
+          banner clears only once the LD sends the matching HOLD/TERM
+          APPR|DENY (Section 5.4) - it never itself executes a real hold or
+          terminate action (Section 4.4.4's non-authoritative boundary). */}
+      {(outstandingRecHold.length > 0 || outstandingRecTerm.length > 0) && (
+        <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Formal Comms Recommendations</div>
+            <span className="text-xs font-bold uppercase text-aat-caution">
+              {outstandingRecHold.length + outstandingRecTerm.length} OUTSTANDING
+            </span>
+          </div>
+          <ul className="space-y-1.5">
+            {[...outstandingRecHold, ...outstandingRecTerm].map((m) => (
+              <li key={m.id} className="border border-aat-caution bg-aat-caution/10 px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-200">
+                PEMSG {m.line}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {showCall && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">

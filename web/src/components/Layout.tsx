@@ -77,22 +77,27 @@ function StationCheckInButton() {
   );
 }
 
+// v9.0 Section 2 - full nav reorder: Dashboard and Mission Schedule fixed
+// first, Range Ops Display fixed second-to-last (immediately before Admin,
+// appended separately below), planning/reference pages grouped ahead of
+// day-of-ops pages in between.
 const navItems = [
   { to: "/", label: "Dashboard", end: true },
-  { to: "/sites", label: "Launch Sites" },
   { to: "/missions", label: "Mission Schedule" },
+  { to: "/sites", label: "Launch Sites" },
   { to: "/faa", label: "FAA Coordination" },
-  { to: "/documents", label: "Documentation Library" },
   { to: "/vehicles", label: "Vehicles" },
-  // v8.0 Section 1 - positioned above Trajectory Simulations, below Vehicles.
+  { to: "/documents", label: "Documentation Library" },
   { to: "/metoc", label: "METOC" },
-  // v6.0 Section 1 - positioned immediately above Range Ops Display.
   { to: "/trajectory-sim", label: "Trajectory Simulations" },
-  // v5.1 Section 2 - available to every role (a display surface, not a
-  // control surface), positioned second-to-last, immediately before Admin.
+  // v9.0 Section 1 - renamed from "Personnel & Stations"; the ON STATION
+  // table moves off this page to the new Stations page below (Section 3.3).
+  { to: "/personnel", label: "Personnel Assignments" },
+  // v9.0 Section 4 - new page: mission selector + identity/status block,
+  // the relocated ON STATION table, and the Formal Role Communications
+  // system.
+  { to: "/stations", label: "Stations" },
   { to: "/range-ops", label: "Range Ops Display" },
-  // v7.0 Section 1 - positioned immediately above Admin.
-  { to: "/personnel", label: "Personnel & Stations" },
 ];
 
 // v7.1 Section 4 - lets a page nested under this Layout (currently only

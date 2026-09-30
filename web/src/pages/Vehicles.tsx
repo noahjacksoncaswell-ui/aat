@@ -616,7 +616,7 @@ function VlcpTemplatesTab() {
   return (
     <div className="space-y-4">
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        A mission's Countdown tab generates its milestone sequence from one of these VLCP Milestone Templates, selected per the assigned
+        A mission's CCS tab generates its milestone sequence from one of these VLCP Milestone Templates, selected per the assigned
         vehicle.
       </p>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

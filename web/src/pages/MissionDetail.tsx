@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addDispositionAddendum,
@@ -9,6 +9,7 @@ import {
   fetchLaunchDayNotifications,
   fetchLotCertification,
   fetchMission,
+  fetchMissionHistoryLog,
   fetchMissionPersonnel,
   fetchNotamStatus,
   fetchSiteWeather,
@@ -34,16 +35,25 @@ import PersistentClockHeader from "../components/PersistentClockHeader";
 import CountdownTab from "../components/CountdownTab";
 import LwccTab from "../components/LwccTab";
 import type { NotificationType, Site } from "../types";
-import { DISPOSITION_OUTCOMES } from "../types";
+import { DISPOSITION_OUTCOMES, MISSION_COMMAND_LOG_CATEGORY } from "../types";
+import { buildMissionLogPdf, missionLogFileName } from "../lib/missionHistory/missionLogPdfExport";
 
-const TABS = ["Overview", "Countdown", "Polls", "FAA & NOTAM", "Log", "History", "LWCC"] as const;
+// v9.0 Section 1A - "Countdown" renamed to "CCS" (Countdown Control
+// Sequencer), label only - no functional change.
+const TABS = ["Overview", "CCS", "Polls", "FAA & NOTAM", "Log", "History", "LWCC"] as const;
 
 export default function MissionDetail() {
   const { missionId } = useParams<{ missionId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { useZulu } = usePreferences();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<(typeof TABS)[number]>("Overview");
+  // v9.0 Section 4.5 - the Stations page's "quick link to your own working
+  // tab" deep-links here via ?tab=; falls back to Overview for any other
+  // entry point or an unrecognized value.
+  const requestedTab = searchParams.get("tab");
+  const initialTab = (TABS as readonly string[]).includes(requestedTab ?? "") ? (requestedTab as (typeof TABS)[number]) : "Overview";
+  const [tab, setTab] = useState<(typeof TABS)[number]>(initialTab);
   const [scrubModalOpen, setScrubModalOpen] = useState(false);
 
   const { data: mission, isLoading } = useQuery({
@@ -136,9 +146,9 @@ export default function MissionDetail() {
         ) : (
           <OverviewTab mission={mission} missionId={missionId!} useZulu={useZulu} onRequestScrub={() => setScrubModalOpen(true)} />
         ))}
-      {tab === "Countdown" &&
+      {tab === "CCS" &&
         (cancelled ? (
-          <LockdownNotice tabName="Countdown" cancelledAt={cancelledAt} useZulu={useZulu} />
+          <LockdownNotice tabName="CCS" cancelledAt={cancelledAt} useZulu={useZulu} />
         ) : (
           <CountdownTab mission={mission} onRequestScrub={() => setScrubModalOpen(true)} />
         ))}
@@ -546,7 +556,7 @@ function TargetModal({ missionId, entries, onClose, onDone }: { missionId: strin
               <strong>
                 {formatTimestamp(entry.windowOpen, useZulu)} – {formatTimestamp(entry.windowClose, useZulu)}
               </strong>
-              . Confirming will lock in FAA/ATC notification requirements and open the LOT submission gate on the Countdown tab.
+              . Confirming will lock in FAA/ATC notification requirements and open the LOT submission gate on the CCS tab.
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button onClick={() => setConfirming(false)} className="btn-secondary">
@@ -632,7 +642,7 @@ function DispositionModal({ missionId, onClose, onDone }: { missionId: string; o
             onChange={(e) => setForm({ ...form, actualLiftoffTime: e.target.value })}
             className="input"
           />
-          <p className="text-[10px] text-slate-400">Leave blank to use the liftoff time established via MARK LIFTOFF on the Countdown tab.</p>
+          <p className="text-[10px] text-slate-400">Leave blank to use the liftoff time established via MARK LIFTOFF on the CCS tab.</p>
           <input placeholder="Total flight time, burnout → recovery (s)" value={form.flightDurationSeconds} onChange={(e) => setForm({ ...form, flightDurationSeconds: e.target.value })} className="input" />
           <div className="grid grid-cols-2 gap-2">
             <input placeholder="Apogee AGL (m)" value={form.apogeeAltitudeAglMeters} onChange={(e) => setForm({ ...form, apogeeAltitudeAglMeters: e.target.value })} className="input" />
@@ -1301,15 +1311,88 @@ function LogTab({ mission, missionId, useZulu, cancelledAt }: any) {
   );
 }
 
+// v9.0 Section 3 - source tags shown on each merged entry, so a reader can
+// tell at a glance which subsystem an entry came from without needing to
+// cross-reference the individual per-subsystem logs (LWCC tab, Personnel
+// Assignments audit history, etc.) that still independently exist.
+const LOG_SOURCE_LABELS: Record<string, string> = {
+  MISSION_LIFECYCLE: "LIFECYCLE",
+  LAUNCH_PERIOD: "LAUNCH PERIOD",
+  LWCC: "LWCC",
+  HOLD: "HOLD",
+  FAA_NOTAM: "FAA/NOTAM",
+  PERSONNEL: "PERSONNEL",
+  POLLS: "LSC/POLLS",
+  MANUAL_LOG: "LOG",
+  COMMS: "COMMS",
+};
+
 function HistoryTab({ mission, missionId, useZulu, cancelledAt }: any) {
   const { data: certification } = useQuery({
     queryKey: ["lotCertification", missionId],
     queryFn: () => fetchLotCertification(missionId),
   });
+  const { data: log } = useQuery({
+    queryKey: ["missionHistoryLog", missionId],
+    queryFn: () => fetchMissionHistoryLog(missionId),
+    refetchInterval: 15_000,
+  });
+  const [exportState, setExportState] = useState<"idle" | "working" | "done" | "error">("idle");
+
+  // v9.0 Section 3.4 - Export/Print: generate PDF, open it immediately in a
+  // new tab, and auto-archive the same PDF to the Documentation Library -
+  // identical pattern to Trajectory Simulation Reports (v6.0 Section 6.5)
+  // and Unofficial MEF documents (v8.0 Section 4.3).
+  async function handleExport() {
+    if (!log) return;
+    setExportState("working");
+    const tab = window.open("", "_blank");
+    try {
+      const doc = buildMissionLogPdf(mission, log);
+      const blob = doc.output("blob");
+      const url = URL.createObjectURL(blob);
+      if (tab) tab.location.href = url;
+      else window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
+
+      const fileName = missionLogFileName(mission);
+      const formData = new FormData();
+      formData.append("file", blob, fileName);
+      formData.append("title", fileName.replace(/\.pdf$/, ""));
+      formData.append("category", MISSION_COMMAND_LOG_CATEGORY);
+      formData.append("missionId", missionId);
+      formData.append("tags", "Mission Command Log");
+      await uploadDocument(formData);
+
+      setExportState("done");
+      setTimeout(() => setExportState("idle"), 3000);
+    } catch (err) {
+      tab?.close();
+      setExportState("error");
+    }
+  }
 
   return (
-    <div className="card mx-auto max-w-3xl space-y-6 p-5">
+    <div className="card mx-auto max-w-4xl space-y-6 p-5">
       {(cancelledAt || mission.status === "CANCELLED") && <ReadOnlyBanner cancelledAt={cancelledAt} useZulu={useZulu} />}
+
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Unified Mission Command Log</div>
+          {log && (
+            <div className="mt-0.5 text-[11px] font-mono uppercase text-slate-400">
+              LOG STATUS: <span className="font-bold">{log.logStatus}</span>
+            </div>
+          )}
+        </div>
+        <button
+          onClick={handleExport}
+          disabled={!log || exportState === "working"}
+          className="shrink-0 rounded-md bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
+        >
+          {exportState === "working" ? "Generating..." : exportState === "done" ? "Archived ✓" : exportState === "error" ? "Failed — Retry" : "Export / Print"}
+        </button>
+      </div>
 
       {certification && (
         <div>
@@ -1350,21 +1433,21 @@ function HistoryTab({ mission, missionId, useZulu, cancelledAt }: any) {
         </div>
       )}
 
-      <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-        Mission History (append-only compliance record)
-      </div>
-      <div className="space-y-3">
-        {mission.historyEvents?.map((ev: any) => (
-          <div key={ev.id} className="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold">{ev.eventType.replace(/_/g, " ")}</span>
-              <span className="text-xs text-slate-400">{formatTimestamp(ev.timestamp, useZulu)}</span>
+      <div>
+        <div className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          Unified Event Feed (every subsystem, strict chronological order)
+        </div>
+        <div className="space-y-2 font-mono text-xs">
+          {log?.entries.map((ev, i) => (
+            <div key={i} className="border-b border-slate-100 pb-2 dark:border-slate-800">
+              <span className="text-slate-400">[{formatTimestamp(ev.timestamp, useZulu)}]</span>{" "}
+              <span className="font-semibold uppercase">[{LOG_SOURCE_LABELS[ev.source] ?? ev.source}]</span> {ev.text}
+              {ev.actorName && <span className="text-slate-500 dark:text-slate-400"> — {ev.actorName}</span>}
             </div>
-            {ev.actor && <div className="text-xs text-slate-500 dark:text-slate-400">by {ev.actor.name}</div>}
-            {ev.notes && <div className="mt-1 text-xs">{ev.notes}</div>}
-          </div>
-        ))}
-        {!mission.historyEvents?.length && <p className="text-sm text-slate-400">No history recorded yet.</p>}
+          ))}
+          {log && log.entries.length === 0 && <p className="font-sans text-sm text-slate-400">No events recorded yet.</p>}
+          {!log && <p className="font-sans text-sm text-slate-400">Loading unified log...</p>}
+        </div>
       </div>
     </div>
   );

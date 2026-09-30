@@ -90,7 +90,7 @@ export default function ResultsView({ config, meta, result, onRestart }: Results
 
   // v6.1 Item 2 - a lightweight confirm, consistent with the weight used
   // elsewhere in the app for non-destructive-but-disruptive actions (e.g.
-  // marking liftoff on the Countdown tab), since this discards the current
+  // marking liftoff on the CCS tab), since this discards the current
   // run's results and configuration with no way back.
   function handleRestart() {
     if (!window.confirm("Restart Simulation? This will discard the current results and configuration.")) return;
