@@ -321,7 +321,18 @@ function ActionCard({
 // underline, brighter tone, and wider letter-spacing so a section boundary
 // registers before reading individual buttons.
 const actionRowClass = "flex flex-wrap items-start gap-3";
-const sectionTitleClass = "mb-2 border-b border-aat-accent/30 pb-1 text-[11px] font-bold uppercase tracking-[0.15em] text-slate-300";
+// v9.8 Section 2 - doubled from mb-2: more breathing room between the title
+// underline and the first row of controls beneath it, specifically (every
+// other spacing value in the console is unchanged).
+const sectionTitleClass = "mb-4 border-b border-aat-accent/30 pb-1 text-[11px] font-bold uppercase tracking-[0.15em] text-slate-300";
+// v9.8 Section 1 - ADD PGM HOLD, WX HOLD — DUR, and PEMSG HOLD — DUR share
+// one fixed width (sized to the longest label, "PEMSG HOLD — DUR") instead
+// of each shrinking to its own text, since the LWCC/PEMSG duration-variant
+// groups stack directly on top of each other and any width mismatch
+// between their submit buttons reads as misalignment. No other button in
+// the console uses this - everything else keeps the Section 3.1.1
+// standard-width rule.
+const DUR_SUBMIT_WIDTH = "w-40 shrink-0";
 
 // v9.3 - CCS Hold Management full restructure. Replaces the prior single
 // Hold Management box with three sibling-level boxes (Section 3): Box One
@@ -941,7 +952,7 @@ function HoldManagement({
                       })
                     }
                     disabled={routineHoldDisabled}
-                    className="btn-secondary shrink-0 text-xs disabled:opacity-50"
+                    className={`btn-secondary ${DUR_SUBMIT_WIDTH} text-xs disabled:opacity-50`}
                   >
                     Add Pgm Hold
                   </button>
@@ -990,7 +1001,7 @@ function HoldManagement({
                       })
                     }
                     disabled={lwccRecDisabled}
-                    className="btn-secondary shrink-0 text-xs disabled:opacity-50"
+                    className={`btn-secondary ${DUR_SUBMIT_WIDTH} text-xs disabled:opacity-50`}
                   >
                     Wx Hold — Dur
                   </button>
@@ -1040,7 +1051,7 @@ function HoldManagement({
                       })
                     }
                     disabled={pemsgRecDisabled}
-                    className="btn-secondary shrink-0 text-xs disabled:opacity-50"
+                    className={`btn-secondary ${DUR_SUBMIT_WIDTH} text-xs disabled:opacity-50`}
                   >
                     PEMSG Hold — Dur
                   </button>
