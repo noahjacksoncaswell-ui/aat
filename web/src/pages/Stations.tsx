@@ -6,6 +6,7 @@ import {
   fetchMissions,
   fetchMissionComms,
   fetchMissionCommsActions,
+  fetchCountdownState,
   fetchLaunchStatusCheck,
   fetchMissionPersonnel,
   sendMissionComms,
@@ -14,6 +15,7 @@ import { useAuth } from "../context/AuthContext";
 import { usePreferences } from "../context/PreferencesContext";
 import { useMissionSocket, getSocket } from "../hooks/useSocket";
 import { formatTimestamp } from "../utils/time";
+import { tickTMinusSeconds, formatTMinus } from "../utils/countdownMath";
 import { OnStationTable } from "../components/OnStationTable";
 import { PollItemRow } from "../components/LaunchStatusCheck";
 import type { CommsActionDef, CommsFieldDef, CommsRecipient, Mission, MissionRole } from "../types";
@@ -70,15 +72,6 @@ function jumpToNearestTargeted(missions: Mission[], setSelectedMissionId: (id: s
   return true;
 }
 
-function fmtSeconds(totalSeconds: number): string {
-  const sign = totalSeconds < 0 ? "+" : "-";
-  const abs = Math.abs(Math.floor(totalSeconds));
-  const h = Math.floor(abs / 3600);
-  const m = Math.floor((abs % 3600) / 60);
-  const s = abs % 60;
-  return `T${sign}${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
 export default function Stations() {
   const { user } = useAuth();
   const { useZulu } = usePreferences();
@@ -119,6 +112,29 @@ export default function Stations() {
     queryFn: () => fetchLaunchStatusCheck(selectedMissionId),
     enabled: !!selectedMissionId,
   });
+  // v9.2 Section 5 - the Test Clock (T-) restated here now rides the same
+  // live infrastructure as PersistentClockHeader/Range Ops Display: the
+  // hold-scheduler-backed /countdown/state query (8s poll baseline,
+  // instantly refreshed on every broadcastMissionUpdate via the mission
+  // socket subscription below) plus a local 1s tick that interpolates
+  // between polls via tickTMinusSeconds - not a bare (lot - now) read on a
+  // ~10s incidental re-render cadence.
+  const { data: countdownState } = useQuery({
+    queryKey: ["countdown", selectedMissionId],
+    queryFn: () => fetchCountdownState(selectedMissionId),
+    refetchInterval: 8000,
+    enabled: !!selectedMissionId,
+  });
+  const [clockNow, setClockNow] = useState(new Date());
+  const [fetchedAt, setFetchedAt] = useState(new Date());
+  useEffect(() => {
+    if (countdownState) setFetchedAt(new Date());
+  }, [countdownState]);
+  useEffect(() => {
+    const t = setInterval(() => setClockNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const tMinus = tickTMinusSeconds(countdownState, fetchedAt, clockNow);
 
   function invalidateAll() {
     qc.invalidateQueries({ queryKey: ["mission", selectedMissionId] });
@@ -126,6 +142,7 @@ export default function Stations() {
     qc.invalidateQueries({ queryKey: ["mission-comms", selectedMissionId] });
     qc.invalidateQueries({ queryKey: ["mission-comms-actions", selectedMissionId] });
     qc.invalidateQueries({ queryKey: ["launch-status-check", selectedMissionId] });
+    qc.invalidateQueries({ queryKey: ["countdown", selectedMissionId] });
   }
   useMissionSocket(selectedMissionId || undefined, invalidateAll);
 
@@ -133,7 +150,7 @@ export default function Stations() {
   const myRole = commsActions?.role ?? myAssignment?.role ?? null;
 
   const targeted = mission?.launchPeriodEntries.find((e) => e.isTargeted) ?? null;
-  const now = Date.now();
+  const now = clockNow.getTime();
   const within24h = targeted
     ? (() => {
         const open = new Date(targeted.windowOpen).getTime();
@@ -200,8 +217,8 @@ export default function Stations() {
           {mission && (
             <div className="text-right">
               <div className="text-[10px] uppercase tracking-wide text-zinc-500">Test Clock (T-)</div>
-              <div className="font-mono text-xl">{mission.lot ? fmtSeconds((new Date(mission.lot).getTime() - now) / 1000) : "PENDING"}</div>
-              <div className="text-[10px] text-zinc-500">Target: {mission.lot ? formatTimestamp(mission.lot, useZulu) : "--"}</div>
+              <div className="font-mono text-xl">{countdownState?.lot ? formatTMinus(tMinus) : "PENDING"}</div>
+              <div className="text-[10px] text-zinc-500">Target: {countdownState?.lot ? formatTimestamp(countdownState.lot, useZulu) : "--"}</div>
             </div>
           )}
         </div>
@@ -495,7 +512,7 @@ function LiveCommsFeed({ messages, useZulu }: { messages: { id: string; line: st
   const recent = [...messages].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 30);
   return (
     <section className="card p-5">
-      <div className="mb-3 text-sm font-bold uppercase tracking-wide text-zinc-300">Live Comms Feed</div>
+      <div className="mb-3 text-sm font-bold uppercase tracking-wide text-zinc-300">PEMSG Log</div>
       <div className="max-h-96 space-y-1 overflow-y-auto font-mono text-xs">
         {recent.length === 0 && <p className="font-sans text-sm text-zinc-500">No formal comms activity yet.</p>}
         {recent.map((m) => (

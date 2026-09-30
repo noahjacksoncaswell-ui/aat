@@ -1315,16 +1315,16 @@ function LogTab({ mission, missionId, useZulu, cancelledAt }: any) {
 // tell at a glance which subsystem an entry came from without needing to
 // cross-reference the individual per-subsystem logs (LWCC tab, Personnel
 // Assignments audit history, etc.) that still independently exist.
+// v9.2 Section 6 - six-category consolidation.
 const LOG_SOURCE_LABELS: Record<string, string> = {
-  MISSION_LIFECYCLE: "LIFECYCLE",
-  LAUNCH_PERIOD: "LAUNCH PERIOD",
+  LIFECYCLE: "LIFECYCLE",
+  CCS: "CCS",
   LWCC: "LWCC",
-  HOLD: "HOLD",
   FAA_NOTAM: "FAA/NOTAM",
-  PERSONNEL: "PERSONNEL",
-  POLLS: "LSC/POLLS",
+  PERUPD: "PERUPD",
+  POLLS: "POLLS",
   MANUAL_LOG: "LOG",
-  COMMS: "COMMS",
+  PEMSG: "PEMSG",
 };
 
 function HistoryTab({ mission, missionId, useZulu, cancelledAt }: any) {

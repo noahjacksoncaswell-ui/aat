@@ -859,7 +859,9 @@ export interface MetocMefResponse {
 
 export type LogStatus = "PENDING" | "IN PROGRESS" | "CLOSED";
 
-export type UnifiedLogSource = "MISSION_LIFECYCLE" | "LAUNCH_PERIOD" | "LWCC" | "HOLD" | "FAA_NOTAM" | "PERSONNEL" | "POLLS" | "MANUAL_LOG" | "COMMS";
+// v9.2 Section 6 - six-category consolidation (was MISSION_LIFECYCLE/
+// LAUNCH_PERIOD/LWCC/HOLD/FAA_NOTAM/PERSONNEL/POLLS/MANUAL_LOG/COMMS).
+export type UnifiedLogSource = "LIFECYCLE" | "CCS" | "LWCC" | "FAA_NOTAM" | "PERUPD" | "POLLS" | "MANUAL_LOG" | "PEMSG";
 
 export interface UnifiedLogEntry {
   timestamp: string;

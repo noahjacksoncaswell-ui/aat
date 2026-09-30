@@ -52,6 +52,24 @@ function fmtLocal(d: Date): string {
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" });
 }
 
+// v9.2 Item 3 [BUG FIX] - root cause of POLLS entries rendering garbled/
+// truncated: jsPDF's base-14 Courier font uses WinAnsiEncoding, which has
+// no glyph for the "→" (right arrow) character every POLLS entry's
+// "X → Y" transition text contains. jsPDF silently switches to a
+// 2-byte encoding partway through the text() call when it hits that
+// character, and everything after it in that call renders as unmapped/
+// invisible glyphs - which is exactly why lines were observed cut off
+// mid-word ("...UNPOLLED U", "...AVIONICS: UNP") rather than word-wrapped.
+// Em dash ("—", used by several other categories) IS in WinAnsi and
+// was never affected - which is why only POLLS (the one category where
+// every single entry contains the arrow) consistently broke. Fixed here,
+// at the PDF layer only: the on-website log view keeps the real arrow
+// glyph (browsers render Unicode natively), only the PDF-bound copy of
+// the text is sanitized to the pure-ASCII teletype-safe substitute.
+function sanitizeForPdf(text: string): string {
+  return text.replace(/→/g, "->");
+}
+
 function fmtEntryTimestamp(iso: string): string {
   const d = new Date(iso);
   const dd = pad2(d.getUTCDate());
@@ -111,7 +129,7 @@ export function buildMissionLogPdf(mission: Mission, log: UnifiedLogResponse): j
   printLine(twoCol("Vehicle:", mission.vehicle.name));
   printLine(twoCol("Site:", mission.site.name));
   printLine(twoCol("Report Generated (Z):", fmtZulu(now)));
-  printLine(twoCol("Report Generated (Local):", fmtLocal(now)));
+  printLine(twoCol("Report Generated (L):", fmtLocal(now)));
   printLine(twoCol("T- (Test Clock):", formatClockSeconds(log.tCountSeconds, "T-")));
   printLine(twoCol("L- (Launch Clock):", formatClockFromTarget(log.projectedLiftoff, now, "L-")));
   printLine(twoCol("LOG STATUS:", log.logStatus), { bold: true });
@@ -126,7 +144,7 @@ export function buildMissionLogPdf(mission: Mission, log: UnifiedLogResponse): j
       ensureRoom(2);
       const ts = fmtEntryTimestamp(e.timestamp);
       const actor = e.actorName ? `  (${e.actorName})` : "";
-      printWrapped(`${ts}  [${e.source}]  ${e.text}${actor}`);
+      printWrapped(sanitizeForPdf(`${ts}  [${e.source}]  ${e.text}${actor}`));
     }
   }
 

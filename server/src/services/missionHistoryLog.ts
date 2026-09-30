@@ -9,21 +9,24 @@
 import { prisma } from "../lib/prisma";
 import { computeTCountSeconds, computeProjectedLiftoff } from "./countdown";
 import { formatCommsLine } from "./commsActions";
+import { LWCC_REQUIREMENTS } from "./lwcc";
 
 export type LogStatus = "PENDING" | "IN PROGRESS" | "CLOSED";
 
+// v9.2 Section 6 - six-category consolidation, replacing the prior
+// tags-per-subsystem scheme with a coherent mental model:
+//   LIFECYCLE - mission-level plan/schedule (what the plan is)
+//   CCS       - countdown/clock mechanics (holds, LOT revision, recycle,
+//               liftoff mark) once a mission is actively counting down
+//   LWCC      - weather compliance activity
+//   FAA_NOTAM - FAA/NOTAM coordination logging
+//   PERUPD    - personnel assignment updates
+//   POLLS     - Launch Status Check activity
+//   MANUAL_LOG - freeform Log tab entries
+//   PEMSG     - formal role communications
 export interface UnifiedLogEntry {
   timestamp: Date;
-  source:
-    | "MISSION_LIFECYCLE"
-    | "LAUNCH_PERIOD"
-    | "LWCC"
-    | "HOLD"
-    | "FAA_NOTAM"
-    | "PERSONNEL"
-    | "POLLS"
-    | "MANUAL_LOG"
-    | "COMMS";
+  source: "LIFECYCLE" | "CCS" | "LWCC" | "FAA_NOTAM" | "PERUPD" | "POLLS" | "MANUAL_LOG" | "PEMSG";
   text: string;
   actorName: string | null;
 }
@@ -35,15 +38,25 @@ const MISSION_HISTORY_LABELS: Record<string, string> = {
   SCRUBBED: "Mission Scrubbed",
   SUCCESSFUL: "Mission Successful",
   LOT_SUBMITTED: "LOT Submitted",
-  LOT_REVISED: "LOT Revised",
+  LOT_REVISED: "LOT Revised (Select New LOT)",
   HOLD_CALLED: "Hold Called",
   HOLD_RELEASED: "Hold Released",
-  RECYCLED: "Mission Recycled",
+  RECYCLED: "Countdown Recycled to Mark",
   LIFTOFF_MARKED: "Liftoff Marked (Actual Launch Time Established)",
   NOTE: "Note",
   COFR_COMPLIANCE_LAPSED: "CoFR Compliance Lapsed",
   COFR_COMPLIANCE_RESOLVED: "CoFR Compliance Resolved",
 };
+
+// v9.2 Section 6.3 - these MissionHistoryEventTypes are countdown/clock
+// mechanics (day-of-operation events), not mission-plan-establishing
+// events, so they belong to [CCS] rather than [LIFECYCLE] - matching the
+// category's own stated boundary ("not the moment-to-moment mechanics of
+// running its clocks") even though the directive's explicit CCS bullet
+// list names these by their UI action label (Select New LOT/Recycle-to-
+// Mark/Mark Liftoff/hold opened-released) rather than their internal
+// MissionHistoryEventType constant names.
+const CCS_HISTORY_EVENT_TYPES = new Set(["LOT_REVISED", "HOLD_CALLED", "HOLD_RELEASED", "RECYCLED", "LIFTOFF_MARKED"]);
 
 // v9.0 Section 3.2 - LWCC hold recommendations: the v5.3 Recommendation
 // Panel text is purely client-side computed each render and never
@@ -52,15 +65,69 @@ const MISSION_HISTORY_LABELS: Record<string, string> = {
 // instruction to flag deviations): recommendation activity is represented
 // via the already-logged LwccLogEntry events themselves, rendered with
 // recommendation-style phrasing, rather than inventing new persisted state.
+//
+// v9.2 Section 7 [SAFETY-CLARITY FIX] - "LWCC-driven hold started" was a
+// real defect: at a glance it reads identically to a real [CCS] countdown
+// hold, but an LWCC violation being logged never freezes the Test Clock by
+// itself (the LWCC panel only recommends - Section 1 of v5.3). Rewritten
+// below (describeLwccEntry) to state explicitly whether the violation is
+// time-governed (with its expiry) or indefinite, and that a recommendation
+// was transmitted to CCS/LD - never a bare, ambiguous "hold started".
 const LWCC_EVENT_LABELS: Record<string, string> = {
   REPORT_SUBMITTED: "LWCC manual report submitted",
-  VIOLATION_TRIGGERED: "LWCC violation triggered — recommend HOLD",
-  HOLD_STARTED: "LWCC-driven hold started",
-  HOLD_EXPIRED: "LWCC-driven hold expired",
   OVERRIDE: "LWCC requirement overridden",
   OVERRIDE_CLEARED: "LWCC override cleared",
   LOG_CLEARED: "LWCC log cleared (display marker; underlying rows retained)",
 };
+
+/**
+ * v9.2 Section 7 - builds the safety-clarity-corrected LWCC entry text for
+ * every event type that represents a violation-driven hold recommendation
+ * surfacing or clearing. Time-governed/indefinite is derived from the
+ * requirement's own static definition (LWCC_REQUIREMENTS[].holdDurationSeconds)
+ * rather than trusting per-row `details` JSON, and the expiry (when
+ * time-governed) is reconstructed as timestamp + holdDurationSeconds -
+ * exactly how the server itself computes it at the moment the row is
+ * written (see server/src/routes/lwcc.ts).
+ */
+function describeLwccEntry(l: { eventType: string; requirementNo: number | null; timestamp: Date; details: unknown }): string | null {
+  const reqDef = l.requirementNo != null ? LWCC_REQUIREMENTS.find((r) => r.no === l.requirementNo) : undefined;
+  const isTimeGoverned = reqDef?.holdDurationSeconds != null;
+
+  function holdStartedText(): string {
+    if (isTimeGoverned) {
+      const expires = new Date(l.timestamp.getTime() + (reqDef!.holdDurationSeconds as number) * 1000);
+      return `LWCC violation hold started (LWCCR ${l.requirementNo}) — TIME-GOVERNED, expires ${expires.toISOString()} — hold recommendation transmitted to CCS/LD`;
+    }
+    return `LWCC violation hold started (LWCCR ${l.requirementNo}) — INDEFINITE — hold recommendation transmitted to CCS/LD`;
+  }
+
+  if (l.eventType === "VIOLATION_TRIGGERED" || l.eventType === "HOLD_STARTED") {
+    return holdStartedText();
+  }
+  if (l.eventType === "HOLD_EXPIRED") {
+    // Never currently written (no scheduler clears a timed LWCC hold row
+    // with its own log entry today), but corrected defensively for the
+    // same safety-clarity reason - kept internally consistent in case this
+    // is wired up in the future.
+    return `LWCC violation hold expired (LWCCR ${l.requirementNo}) — LWCC-side resolution, not a CCS-executed action`;
+  }
+  if (l.eventType === "REPORT_SUBMITTED") {
+    const violation = (l.details as any)?.violation === true;
+    if (violation && !isTimeGoverned) {
+      // The only signal an indefinite/instantaneous-limit violation ever
+      // produces - there is no separate HOLD_STARTED row for these
+      // (Section 7.4 of v3.0: untimed requirements have no hold timer).
+      return holdStartedText();
+    }
+    if (violation === false) {
+      // A manual report clearing a prior violation - the corresponding
+      // "violation cleared/resolved" entry Section 7 also requires.
+      return `LWCC violation cleared (LWCCR ${l.requirementNo}) — manual report — LWCC-side resolution, not a CCS-executed action`;
+    }
+  }
+  return null; // fall through to the static LWCC_EVENT_LABELS lookup
+}
 
 const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
   T_MINUS_60: "T-60 FAA/NOTAM notification",
@@ -116,27 +183,30 @@ export async function buildUnifiedLog(missionId: string): Promise<UnifiedLogEntr
     const label = MISSION_HISTORY_LABELS[e.eventType] ?? e.eventType;
     entries.push({
       timestamp: e.timestamp,
-      source: "MISSION_LIFECYCLE",
+      source: CCS_HISTORY_EVENT_TYPES.has(e.eventType) ? "CCS" : "LIFECYCLE",
       text: e.notes ? `${label} — ${e.notes}` : label,
       actorName: e.actor?.name ?? null,
     });
   }
 
+  // v9.2 Section 6.1 - Launch Period entries fold into [LIFECYCLE]; no
+  // longer a distinct category.
   for (const lp of launchPeriodEntries) {
     entries.push({
       timestamp: lp.createdAt,
-      source: "LAUNCH_PERIOD",
+      source: "LIFECYCLE",
       text: `Launch Period entry set: ${lp.date.toISOString().slice(0, 10)} window ${lp.windowOpen.toISOString()} – ${lp.windowClose.toISOString()}`,
       actorName: null,
     });
   }
 
   for (const l of lwccLog) {
+    const correctedText = describeLwccEntry(l);
     const label = LWCC_EVENT_LABELS[l.eventType] ?? l.eventType;
     entries.push({
       timestamp: l.timestamp,
       source: "LWCC",
-      text: l.requirementNo != null ? `${label} (LWCCR ${l.requirementNo})` : label,
+      text: correctedText ?? (l.requirementNo != null ? `${label} (LWCCR ${l.requirementNo})` : label),
       actorName: l.actor?.name ?? null,
     });
   }
@@ -150,7 +220,7 @@ export async function buildUnifiedLog(missionId: string): Promise<UnifiedLogEntr
     const estText = h.estimatedDurationSeconds != null ? `, estimated duration ${fmtSecs(h.estimatedDurationSeconds)}` : ", indefinite/unscheduled duration";
     entries.push({
       timestamp: openedAt,
-      source: "HOLD",
+      source: "CCS",
       text: `${kind} hold opened at T-minus ${fmtSecs(h.holdMarkSeconds)}${estText}`,
       actorName: h.enteredBy?.name ?? null,
     });
@@ -158,7 +228,7 @@ export async function buildUnifiedLog(missionId: string): Promise<UnifiedLogEntr
     if (h.status === "DURATION_ELAPSED" && h.estimatedDurationSeconds != null && h.actualStartedAt) {
       entries.push({
         timestamp: new Date(h.actualStartedAt.getTime() + h.estimatedDurationSeconds * 1000),
-        source: "HOLD",
+        source: "CCS",
         text: `${kind} hold ran into overage past its ${fmtSecs(h.estimatedDurationSeconds)} estimate (manual Proceed required)`,
         actorName: null,
       });
@@ -168,7 +238,7 @@ export async function buildUnifiedLog(missionId: string): Promise<UnifiedLogEntr
       const adjustment = h.actualDurationSeconds != null ? `, Launch Clock adjusted +${fmtSecs(h.actualDurationSeconds)}` : "";
       entries.push({
         timestamp: h.actualEndedAt,
-        source: "HOLD",
+        source: "CCS",
         text: `${kind} hold released${adjustment}`,
         actorName: h.enteredBy?.name ?? null,
       });
@@ -228,7 +298,7 @@ export async function buildUnifiedLog(missionId: string): Promise<UnifiedLogEntr
       default:
         text = `${p.role} personnel event: ${p.action}`;
     }
-    entries.push({ timestamp: p.timestamp, source: "PERSONNEL", text, actorName: p.actor.name });
+    entries.push({ timestamp: p.timestamp, source: "PERUPD", text, actorName: p.actor.name });
   }
 
   for (const a of pollAudit) {
@@ -255,9 +325,15 @@ export async function buildUnifiedLog(missionId: string): Promise<UnifiedLogEntr
     entries.push({ timestamp: m.timestamp, source: "MANUAL_LOG", text: m.text, actorName: m.author.name });
   }
 
-  // v9.0 Section 3.2/4.4.3 - formal comms messages, PEMSG-prefixed,
-  // rendered in the exact same compact format the Stations page composer
-  // produces.
+  // v9.0 Section 3.2/4.4.3 - formal comms messages, rendered in the exact
+  // same compact format the Stations page composer produces.
+  //
+  // v9.2 Section 6.6 - the bracket tag is now [PEMSG] itself, so the
+  // inline "PEMSG " text prefix formerly prepended here is redundant and
+  // removed - scoped strictly to this Unified Log view. The CCS escalation
+  // banner and the Stations page's own PEMSG Log each build their own
+  // display text independently (CountdownTab.tsx / Stations.tsx) and are
+  // untouched: both keep the inline "PEMSG" prefix exactly as before.
   for (const c of commsMessages) {
     const line = formatCommsLine({
       timestamp: c.timestamp,
@@ -267,7 +343,7 @@ export async function buildUnifiedLog(missionId: string): Promise<UnifiedLogEntr
       fields: c.fields as Record<string, unknown> | null,
       detail: c.detail,
     });
-    entries.push({ timestamp: c.timestamp, source: "COMMS", text: `PEMSG  ${line}`, actorName: c.sender.name });
+    entries.push({ timestamp: c.timestamp, source: "PEMSG", text: line, actorName: c.sender.name });
   }
 
   entries.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());

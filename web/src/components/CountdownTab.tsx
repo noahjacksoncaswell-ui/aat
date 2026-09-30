@@ -270,8 +270,7 @@ function HoldManagement({
     queryFn: () => fetchMissionComms(mission.id),
     refetchInterval: 10_000,
   });
-  const outstandingRecHold = (commsMessages ?? []).filter((m) => m.actionCode === "REC HOLD" && !m.resolvedAt);
-  const outstandingRecTerm = (commsMessages ?? []).filter((m) => m.actionCode === "REC TERM" && !m.resolvedAt);
+  const outstandingPemsg = (commsMessages ?? []).filter((m) => (m.actionCode === "REC HOLD" || m.actionCode === "REC TERM") && !m.resolvedAt);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["countdown", mission.id] });
@@ -546,34 +545,44 @@ function HoldManagement({
         )}
       </div>
 
-      {/* v9.0 Section 5 - formal comms REC HOLD/REC TERM escalation banner.
-          Same placement/visual treatment as the LWCC Recommendation panel
-          directly above (Section 5.3), but every outstanding recommendation
-          is shown as its own full stacked line (Section 5.3: NOT
-          collapsed/summarized like the LWCC panel's longest-remaining
-          logic) - each with its full compact message text and timestamp.
-          Only REC HOLD/REC TERM escalate (Section 5.2); every other comms
-          action stays in the Stations live feed and Unified Log only. A
-          banner clears only once the LD sends the matching HOLD/TERM
-          APPR|DENY (Section 5.4) - it never itself executes a real hold or
-          terminate action (Section 4.4.4's non-authoritative boundary). */}
-      {(outstandingRecHold.length > 0 || outstandingRecTerm.length > 0) && (
-        <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Formal Comms Recommendations</div>
-            <span className="text-xs font-bold uppercase text-aat-caution">
-              {outstandingRecHold.length + outstandingRecTerm.length} OUTSTANDING
-            </span>
-          </div>
+      {/* v9.2 Item 2 - formal comms REC HOLD/REC TERM escalation banner,
+          now ALWAYS present (previously only rendered when something was
+          outstanding), recreating the LWCC Recommendation panel's own
+          layout pattern exactly per the v9.2 directive: title left, a
+          single top-right status word in the same position as that
+          panel's NO VIOLATION/VIOLATION word, and a body that is either
+          the stacked list of outstanding recommendations (Section 5.3 of
+          v9.0 - full timestamp + compact message text, never collapsed)
+          or, when none are outstanding, the same two-line CLEAR pattern
+          the LWCC panel itself uses for its own always-rendered
+          recommendation box. Only REC HOLD/REC TERM escalate (Section 5.2
+          of v9.0); every other comms action stays in the Stations live
+          feed and Unified Log only. A banner entry clears only once the
+          LD sends the matching HOLD/TERM APPR|DENY (Section 5.4 of v9.0)
+          - it never itself executes a real hold or terminate action
+          (Section 4.4.4's non-authoritative boundary). */}
+      <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">PEMSG HOLD/TERM RECOMMENDATIONS</div>
+          <span className={`text-xs font-bold uppercase ${outstandingPemsg.length > 0 ? "text-aat-nogo" : "text-aat-go"}`}>
+            {outstandingPemsg.length > 0 ? `${outstandingPemsg.length} OUTSTANDING` : "CLEAR"}
+          </span>
+        </div>
+
+        {outstandingPemsg.length > 0 ? (
           <ul className="space-y-1.5">
-            {[...outstandingRecHold, ...outstandingRecTerm].map((m) => (
+            {outstandingPemsg.map((m) => (
               <li key={m.id} className="border border-aat-caution bg-aat-caution/10 px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-200">
                 PEMSG {m.line}
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        ) : (
+          <div className="border border-aat-caution bg-aat-caution/10 px-3 py-2 text-xs font-bold uppercase tracking-wide text-aat-caution">
+            NO PEMSG HOLD/TERM RECOMMENDATIONS OUTSTANDING
+          </div>
+        )}
+      </div>
 
       {showCall && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4">
